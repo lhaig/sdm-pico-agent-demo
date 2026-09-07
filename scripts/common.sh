@@ -312,7 +312,7 @@ grafana_alert_rule_exists() {
 # #    POST <stack>/api/plugins/grafana-irm-app/resources/api/v1/           #
 # #         IncidentsService.CreateIncident                                 #
 # #         IncidentsService.QueryIncidentPreviews                          #
-# #         IncidentsService.CloseIncident                                  #
+# #         IncidentsService.UpdateStatus                                   #
 # #         ActivityService.AddActivity                                     #
 # #                                                                         #
 # #  The method names and the response field the ID lives in are the parts  #
@@ -374,14 +374,13 @@ irm_list_open_incidents() {
 
 irm_close_incident() {
     # irm_close_incident <incidentID> [summary]
-    local id="$1" summary="${2:-Closed by scripts/reset.sh between rehearsals.}"
+    local id="$1"
     have jq || return 9
 
     local body
-    body="$(jq -nc --arg id "$id" --arg s "$summary" \
-        '{incidentID:$id, summary:$s}')"
+    body="$(jq -nc --arg id "$id" '{incidentID:$id, status:"resolved"}')"
 
-    irm_rpc IncidentsService.CloseIncident "$body" >/dev/null 2>&1
+    irm_rpc IncidentsService.UpdateStatus "$body" >/dev/null 2>&1
 }
 
 irm_incident_url() {
