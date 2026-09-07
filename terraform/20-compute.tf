@@ -64,11 +64,9 @@ data "aws_caller_identity" "current" {}
 # -----------------------------------------------------------------------------
 #  orders-api deployment inputs
 #
-#  The real application is app/orders-api/main.py — FastAPI, uvicorn, port 8080,
-#  reading public.orders through psycopg2. It is embedded into the app servers'
-#  user-data at PLAN time by the `file()` calls below, so there is no clone, no
-#  network dependency at boot, and no way for the deployed service to drift from
-#  what is in the repository.
+#  The real application is app/orders-api/main.py. App hosts clone the same
+#  pinned public repository ref as the agent; embedding it exceeds EC2's 16 KiB
+#  user-data limit.
 #
 #  `app_listen_port` is the single source of truth for the port. It is consumed
 #  by templates/app-server.sh.tftpl (which rewrites the unit's `--port` and
@@ -79,10 +77,6 @@ data "aws_caller_identity" "current" {}
 # -----------------------------------------------------------------------------
 locals {
   app_listen_port = 8080
-
-  orders_api_main_py      = file("${path.module}/../app/orders-api/main.py")
-  orders_api_requirements = file("${path.module}/../app/orders-api/requirements.txt")
-  orders_api_unit         = file("${path.module}/../app/orders-api/orders-api.service")
 
   # ---------------------------------------------------------------------------
   #  ONE map per app server, built once, so the two aws_instance blocks below
@@ -105,9 +99,8 @@ locals {
     db_name         = var.db_name
     app_listen_port = local.app_listen_port
 
-    orders_api_main_py      = local.orders_api_main_py
-    orders_api_requirements = local.orders_api_requirements
-    orders_api_unit         = local.orders_api_unit
+    nightshift_repo_url = var.nightshift_repo_url
+    nightshift_repo_ref = var.nightshift_repo_ref
 
     # --- Prometheus agent -> Grafana Cloud (replaced the CloudWatch publisher)
     prometheus_version         = var.prometheus_agent_version
@@ -821,7 +814,7 @@ resource "aws_instance" "app_01" {
     Role = "orders-api"
   }
 
-  depends_on = [aws_nat_gateway.main]
+  depends_on = [aws_nat_gateway.main, aws_secretsmanager_secret_version.db]
 }
 
 resource "aws_instance" "app_02" {
@@ -854,7 +847,7 @@ resource "aws_instance" "app_02" {
     Role = "orders-api"
   }
 
-  depends_on = [aws_nat_gateway.main]
+  depends_on = [aws_nat_gateway.main, aws_secretsmanager_secret_version.db]
 }
 
 
