@@ -1,0 +1,97 @@
+# =============================================================================
+# orders-api systemd unit — install on app-01 and app-02.
+# =============================================================================
+# In the demo, terraform/templates/app-server.sh.tftpl does all of this from
+# user-data: it embeds this file verbatim, rewrites `--port` from
+# `local.app_listen_port`, and writes /etc/orders-api.env from the RDS secret.
+# The steps below are the by-hand equivalent, for a laptop or a rebuild.
+#
+#   sudo install -d -o orders -g orders /opt/orders-api
+#   sudo cp -r app/orders-api/* /opt/orders-api/
+#   sudo python3 -m venv /opt/orders-api/venv
+#   sudo /opt/orders-api/venv/bin/pip install -r /opt/orders-api/requirements.txt
+#   sudo install -m 0640 -o root -g orders app/orders-api/orders-api.env.example \
+#        /etc/orders-api.env      # then edit the real values in
+#   sudo cp app/orders-api/orders-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now orders-api
+#
+# Logs (this is what the agent reads over `sdm ssh` in Moment 1):
+#   journalctl -u orders-api -n 100 --no-pager
+# =============================================================================
+
+[Unit]
+Description=orders-api (Shopfront order service)
+Documentation=https://github.com/your-org/SDMChallenge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=orders
+Group=orders
+WorkingDirectory=/opt/orders-api
+
+# Database credentials live here, mode 0640, root:orders.
+# On app-01/app-02 this is a real credential — these are the application's own
+# hosts, not the agent's. The whole point of the demo is that the AGENT host
+# has nothing equivalent.
+EnvironmentFile=/etc/orders-api.env
+
+# --workers 1 IS DELIBERATE. DO NOT RAISE IT.
+#
+# The 5xx counter behind /metrics lives in process memory. With two workers
+# there are two independent counters, and /metrics is answered by whichever
+# worker happens to accept the scrape — so consecutive scrapes read from
+# different counters and the value visibly moves up and down.
+#
+# THAT MATTERS MORE UNDER PROMETHEUS THAN IT DID UNDER THE OLD CLOUDWATCH
+# PUBLISHER, NOT LESS.
+#
+# `http_requests_5xx_total` is declared a COUNTER, and rate() assumes counters
+# only ever increase: a decrease is read as a process restart, so rate()
+# discards the drop and starts again from the new value. Two workers answering
+# alternate scrapes look exactly like a process restarting every 15 seconds.
+# The rate is then computed from noise — sometimes zero when the service is
+# failing, sometimes a spike when it is healthy — and the Grafana alert rule
+# (terraform/96-grafana.tf) either never fires or fires and will not clear.
+#
+# Either way the Act 2 recovery beat — "the 5xx rate is back to zero, the
+# alert has cleared" — becomes a claim you cannot make on stage.
+#
+# One worker, one counter, monotonic. The demo's traffic is a handful of
+# requests a minute; concurrency is not the constraint here, correctness of
+# the signal is. Fix this properly with a shared counter (Redis, or
+# prometheus_client's multiprocess mode) before anyone runs it for real.
+ExecStart=/opt/orders-api/venv/bin/uvicorn main:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1 \
+    --proxy-headers \
+    --forwarded-allow-ips='*' \
+    --log-level info \
+    --access-log
+
+# Restart, but not so eagerly that a crash loop hides the 5xx signal.
+# The failure mode here is per-request exceptions, not process death, so this
+# mostly matters for deploys.
+Restart=on-failure
+RestartSec=5s
+
+# Modest hardening. Enough to look like a real service; not so much that
+# journald/log access from the agent's SSH session gets awkward.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/orders-api
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orders-api
+
+[Install]
+WantedBy=multi-user.target

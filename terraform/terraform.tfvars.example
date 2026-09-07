@@ -1,0 +1,217 @@
+# =============================================================================
+#  Project Nightshift — example variable values
+#
+#      cp terraform.tfvars.example terraform.tfvars
+#
+#  terraform.tfvars IS GITIGNORED. Keep it that way.
+#
+#  Better still, keep the secrets out of the file entirely and export them:
+#
+#      export TF_VAR_db_password='...'
+#      export TF_VAR_github_mcp_token='...'
+#      export TF_VAR_mcp_caller_bearer_token='...'
+#      export TF_VAR_grafana_service_account_token='glsa_...'
+#      export TF_VAR_grafana_cloud_access_policy_token='...'
+#      export TF_VAR_openai_api_key='...'
+#
+#  StrongDM API credentials are NOT variables — the provider reads them from the
+#  environment and nowhere else, which makes them impossible to commit:
+#
+#      export SDM_API_ACCESS_KEY='...'
+#      export SDM_API_SECRET_KEY='...'
+# =============================================================================
+
+
+# --- Identity ----------------------------------------------------------------
+
+project = "nightshift"
+owner   = "lance.haig@delinea.com"
+
+
+# --- AWS placement -----------------------------------------------------------
+
+aws_region         = "eu-west-1"
+availability_zones = ["eu-west-1a", "eu-west-1b"]
+
+
+# --- Network -----------------------------------------------------------------
+
+vpc_cidr             = "10.20.0.0/16"
+public_subnet_cidrs  = ["10.20.0.0/24", "10.20.1.0/24"]
+private_subnet_cidrs = ["10.20.10.0/24", "10.20.11.0/24"]
+
+# --- Compute -----------------------------------------------------------------
+
+gateway_instance_type  = "t3.small"
+relay_instance_type    = "t3.small"
+agent_instance_type    = "t3.small"
+app_instance_type      = "t3.micro"
+mcp_host_instance_type = "t3.micro"
+
+# Pinned to break the Terraform dependency cycle between the EC2 instances and
+# the StrongDM SSH resources — see the long note at the top of 20-compute.tf.
+# Must fall inside the corresponding private subnet CIDR.
+app_01_private_ip = "10.20.10.11"
+app_02_private_ip = "10.20.11.12"
+agent_vm_private_ip = "10.20.10.22"
+
+# mcp-host is pinned for a related but different reason: the StrongDM
+# `grafana-mcp` resource URL is http://<this address>:8000/mcp. Let it float and
+# the resource URL churns on every rebuild.
+mcp_host_private_ip = "10.20.10.21"
+
+
+# --- Database ----------------------------------------------------------------
+
+db_name           = "shopfront"
+db_username       = "shopfront_admin"
+db_instance_class = "db.t4g.micro"
+
+# SECRET — prefer TF_VAR_db_password. Shown here only so the file is complete.
+# db_password = "CHANGE-ME-before-apply"
+
+
+# --- StrongDM node bootstrap (§7.2) ------------------------------------------
+# These are SSM parameter paths, not token values. Terraform writes the
+# provider's sensitive computed tokens to them automatically.
+
+gateway_token_ssm_path   = "/nightshift/sdm/gateway-token"
+relay_token_ssm_path     = "/nightshift/sdm/relay-token"
+agent_sdm_token_ssm_path = "/nightshift/sdm/agent-token"
+gateway_listen_port      = 5555
+
+
+# --- StrongDM identity -------------------------------------------------------
+#  The humans who approve the agent's request in Slack while the room watches.
+#  In a real deployment these come from the customer's IdP via SCIM.
+
+human_users = {
+  lance = {
+    email            = "lance.haig@delinea.com"
+    first_name       = "Lance"
+    last_name        = "Haig"
+    permission_level = "admin"
+  }
+
+  # A second approver is useful for rehearsal — one of you can play the SRE.
+  # sam = {
+  #   email            = "sam.example@delinea.com"
+  #   first_name       = "Sam"
+  #   last_name        = "Example"
+  #   permission_level = "user"
+  # }
+}
+
+
+# --- MCP servers -------------------------------------------------------------
+#  One self-hosted, one SaaS, both behind MCP Gateway (§4.4).
+
+# The self-hosted one. PIN THE TAG — Grafana's MCP tool names have churned and
+# policy 40 matches them exactly. `:latest` is a policy that stops firing on a
+# Thursday, silently. Re-run `picoclaw mcp show grafana` after any bump.
+mcp_grafana_image = "grafana/mcp-grafana:1.3.0"
+mcp_grafana_port  = 8000
+
+# `--allowed-origins`. EMPTY IS NOT "no restriction" — empty rejects any request
+# carrying an Origin header at all, and the 403 looks like a network fault.
+# "*" is fine here because only the relay SG can reach :8000.
+mcp_grafana_allowed_origins = "*"
+
+# DELIBERATELY the full toolset, NOT the /readonly variant. Cedar has to be the
+# thing that stops the merge — see policies/40-mcp-tool-limits.cedar.
+github_mcp_url = "https://api.githubcopilot.com/mcp/"
+
+# SECRETS — prefer TF_VAR_mcp_caller_bearer_token / TF_VAR_github_mcp_token.
+#   mcp_caller_bearer_token is the MCP Gateway -> mcp-grafana hop. Any high
+#   entropy string: openssl rand -hex 32. It is NOT the Grafana token.
+# mcp_caller_bearer_token = "..."
+# github_mcp_token        = "ghp_..."
+
+# The repository the agent files its postmortem issue against, owner/name.
+# Terraform does NOT create it. Pre-stage the repo AND leave one pull request
+# OPEN (manual step M8) — Act 3 is the agent being refused when it tries to
+# merge, and with no open PR merge_pull_request is never called at all.
+# Put the same value in agent/workspace/AGENT.md section 2.
+github_repo = "your-org/shopfront-platform"
+
+
+# --- Access workflow ---------------------------------------------------------
+
+# Short enough that the audience watches it expire during the session.
+write_access_max_duration = "15m0s"
+
+# --- Grafana Cloud ------------------------------------------------------------
+#  Free tier, one stack, and it covers everything here (§4.5).
+#  Watch the 3-active-IRM-users-per-month limit. You + the agent = 2.
+
+# Hostname label only — for https://nightshift.grafana.net this is "nightshift".
+grafana_stack_slug = "nightshift"
+
+# Full stack URL, scheme included. NOT grafana.com (that is the Cloud Portal and
+# it takes the other token type) and NOT the Prometheus endpoint.
+grafana_url = "https://nightshift.grafana.net/"
+
+# SECRETS — two DIFFERENT Grafana credentials. Do not mix them up (§4.5):
+#
+#   grafana_service_account_token       `glsa_…`, created INSIDE the stack.
+#                                       Used by the grafana Terraform provider
+#                                       and held by the mcp-grafana container.
+#
+#   grafana_cloud_access_policy_token   created in the Cloud PORTAL at
+#                                       grafana.com. Scopes: stacks:read AND
+#                                       metrics:write. Used by
+#                                       data.grafana_cloud_stack and as the
+#                                       remote_write basic-auth password.
+#
+# grafana_service_account_token     = "glsa_..."
+# grafana_cloud_access_policy_token = "..."
+
+# Both optional. Empty means "read it from data.grafana_cloud_stack", which is
+# correct — the remote_write host is prometheus-prod-NN-<region-slug>, different
+# per stack, and hardcoding it is how you end up debugging a 401 on stage.
+grafana_prometheus_instance_id      = ""
+grafana_prometheus_remote_write_url = ""
+
+# The hosted Prometheus datasource is named EITHER `grafanacloud-prom` OR
+# `grafanacloud-<slug>-prom` depending on how the stack was provisioned. If the
+# apply fails with "data source not found", read the real name from
+# Connections -> Data sources, or set the UID below and skip the lookup.
+grafana_prom_datasource_name = "grafanacloud-prom"
+grafana_prom_datasource_uid  = ""
+
+grafana_folder_title = "Nightshift"
+
+# 5xx RATE in errors/second. ~3 failed requests a minute. Must equal
+# ALERT_5XX_RATE_THRESHOLD in scripts/.env — trigger-agent.sh quotes it in the
+# canned payload and the agent reads the number back out loud.
+alert_5xx_rate_threshold = 0.05
+
+# 60s evaluation + `for = 1m` => roughly 60-180s from poison to page (§6).
+alert_evaluation_interval_seconds = 60
+
+# Prometheus AGENT MODE on app-01/app-02: scrape loopback, remote_write, no
+# local TSDB. PIN A 3.x VERSION — app-server.sh.tftpl uses the 3.x `--agent`
+# flag; 2.x wanted `--enable-feature=agent`.
+prometheus_agent_version   = "3.5.0"
+prometheus_scrape_interval = "15s"
+
+# True is right for a demo rebuilt weekly. Indefensible near a real audit trail.
+audit_bucket_force_destroy = true
+
+
+# --- Agent VM ----------------------------------------------------------------
+
+# PINNED. PicoClaw is pre-1.0 (§7.3); "latest" is a demo that works on Tuesday
+# and does not on Thursday.
+picoclaw_version = "v0.3.1"
+
+# The agent VM's user-data clones THIS repository and execs agent/bootstrap.sh —
+# there is exactly one agent installation in this build and that script is it.
+# Must be readable from the agent VM without credentials. Never put a deploy key
+# on that host; it is the one host we assume is already owned.
+nightshift_repo_url = "https://github.com/your-org/SDMChallenge.git"
+nightshift_repo_ref = "main"
+
+# SECRET — prefer TF_VAR_openai_api_key.
+# This is the ONLY credential that legitimately sits on the agent host.
+# openai_api_key = "sk-..."

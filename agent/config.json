@@ -1,0 +1,136 @@
+{
+  "version": 3,
+
+  "agents": {
+    "defaults": {
+      "workspace": "/opt/nightshift/workspace",
+      "restrict_to_workspace": true,
+      "allow_read_outside_workspace": false,
+      "model_name": "nightshift",
+      "max_tokens": 8192,
+      "context_window": 128000,
+      "temperature": 0.2,
+      "max_tool_iterations": 30
+    }
+  },
+
+  "model_list": [
+    {
+      "model_name": "nightshift",
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "api_base": "https://api.openai.com/v1",
+      "request_timeout": 300
+    }
+  ],
+
+  "channel_list": {
+    "slack": {
+      "enabled": false,
+      "type": "slack",
+      "allow_from": [
+        "U_REPLACE_WITH_PRESENTER_USER_ID",
+        "U_REPLACE_WITH_APPROVER_USER_ID"
+      ],
+      "group_trigger": {
+        "mention_only": true
+      },
+      "typing": {
+        "enabled": true
+      },
+      "placeholder": {
+        "enabled": true,
+        "text": "Nightshift is on it..."
+      },
+      "settings": {
+        "bot_token": "",
+        "app_token": ""
+      }
+    }
+  },
+
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18790,
+    "hot_reload": true,
+    "log_level": "info"
+  },
+
+  "tools": {
+    "exec": {
+      "enabled": true,
+      "enable_deny_patterns": true,
+      "custom_allow_patterns": [
+        "^\\./bin/db-query\\.sh(\\s|$)",
+        "^\\./bin/sdm-request-access\\.sh(\\s|$)",
+        "^bin/db-query\\.sh(\\s|$)",
+        "^bin/sdm-request-access\\.sh(\\s|$)",
+        "^sdm status(\\s|$)"
+      ],
+      "custom_deny_patterns": [
+        "(?i)\\bsdm\\s+admin\\b",
+        "(?i)\\bpicoclaw\\s+(mcp|config|onboard)\\b",
+        "(?i)\\.security\\.yml",
+        "(?i)\\bcrontab\\b",
+        "(?i)\\bsystemctl\\b"
+      ],
+      "allow_remote": false
+    },
+
+    "mcp": {
+      "enabled": true,
+      "servers": {
+        "grafana": {
+          "enabled": true,
+          "type": "http",
+          "url": "http://127.0.0.1:10001/mcp"
+        },
+        "github": {
+          "enabled": true,
+          "type": "http",
+          "url": "http://127.0.0.1:10002/mcp"
+        }
+      }
+    },
+
+    "read_file":     { "enabled": true },
+    "write_file":    { "enabled": true },
+    "edit_file":     { "enabled": true },
+    "append_file":   { "enabled": true },
+    "list_dir":      { "enabled": true },
+    "message":       { "enabled": true },
+    "send_file":     { "enabled": true },
+    "cron":          { "enabled": true },
+    "skills":        { "enabled": true },
+    "find_skills":   { "enabled": true },
+
+    "web":           { "enabled": false },
+    "web_fetch":     { "enabled": false },
+    "load_image":    { "enabled": false },
+    "send_tts":      { "enabled": false },
+    "spawn":         { "enabled": false },
+    "spawn_status":  { "enabled": false },
+    "subagent":      { "enabled": false },
+    "install_skill": { "enabled": false },
+    "media_cleanup": { "enabled": false },
+    "i2c":           { "enabled": false },
+    "spi":           { "enabled": false },
+    "serial":        { "enabled": false },
+
+    "filter_sensitive_data": true,
+
+    "allow_read_paths": [
+      "/opt/nightshift/workspace",
+      "/var/log/nightshift"
+    ],
+    "allow_write_paths": [
+      "/opt/nightshift/workspace/memory",
+      "/opt/nightshift/workspace/sessions"
+    ]
+  },
+
+  "heartbeat": {
+    "enabled": true,
+    "interval": 5
+  }
+}

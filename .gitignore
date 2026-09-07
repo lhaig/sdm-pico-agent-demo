@@ -1,0 +1,9 @@
+.venv/
+.DS_Store
+*.key
+*.pem
+*.log
+.env
+.env.*
+!.env.example
+slides/node_modules/

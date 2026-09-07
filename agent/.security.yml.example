@@ -1,0 +1,39 @@
+# =============================================================================
+# ~/.picoclaw/.security.yml   —   PicoClaw credential companion file
+# =============================================================================
+# Copy to ~/.picoclaw/.security.yml on the agent VM and chmod 0600.
+# bootstrap.sh does this for you and will refuse to continue if the mode is
+# wrong.
+#
+#     install -m 0600 agent/.security.yml.example ~/.picoclaw/.security.yml
+#     ${EDITOR:-vi} ~/.picoclaw/.security.yml
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# From schema v2 onwards PicoClaw IGNORES a singular `api_key` inside
+# config.json. Model credentials go here, as a LIST, under
+# `model_list.<alias>.api_keys`. Getting this wrong produces an
+# authentication failure that looks like a model outage, which is an
+# entertaining thing to debug ten minutes before you go on stage.
+#
+# Resolution order:   environment variable  >  this file  >  config.json
+#
+# WHAT IS AND IS NOT IN HERE
+# --------------------------
+# In here:      the OpenAI API key. That is it.
+#
+# NOT in here:  the production database password, the SSH private key for
+#               app-01/app-02, the Grafana MCP caller bearer, the GitHub PAT.
+#
+# None of those exist anywhere on the agent VM. Do not print this file during a
+# demo: it contains the model key.
+# =============================================================================
+
+model_list:
+  # The alias must match `model_name` in config.json's model_list entry.
+  nightshift:
+    api_keys:
+      # A list, not a scalar. PicoClaw rotates across entries, so you can put a
+      # spare here before a live demo and survive one key being rate-limited.
+      - "sk-REPLACE_WITH_OPENAI_API_KEY"
+      # - "sk-REPLACE_WITH_BACKUP_OPENAI_API_KEY"

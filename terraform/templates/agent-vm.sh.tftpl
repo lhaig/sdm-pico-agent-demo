@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Project Nightshift — agent-vm bootstrap  (PicoClaw + the sdm client)
+#
+#  Rendered by templatefile() from 20-compute.tf.
+#
+#  ---------------------------------------------------------------------------
+#  THIS FILE INSTALLS NOTHING. IT FETCHES THE REPO AND RUNS agent/bootstrap.sh.
+#  ---------------------------------------------------------------------------
+#  That is deliberate, and it is the only thing this file should ever do.
+#
+#  There used to be a second agent installation written inline here. It built a
+#  different machine from the one every other file in this repository talks to:
+#
+#      here (old)                      agent/bootstrap.sh (canonical)
+#      /opt/picoclaw/workspace         /home/ubuntu/.picoclaw/workspace
+#      bin/sdm-ssh, bin/sdm-psql       bin/db-query.sh,
+#                                      bin/sdm-request-access.sh
+#      /opt/picoclaw/shim.py :8080     /opt/nightshift/task-shim.py :18791
+#      POST /task, no auth             POST /incident + GET /jobs, Bearer token
+#      allow "^bin/sdm-ssh "           allow "^\./bin/db-query\.sh"
+#
+#  agent/config.json, agent/workspace/AGENT.md, scripts/verify.sh and
+#  scripts/trigger-agent.sh all describe the RIGHT-HAND column. Half the
+#  operator tooling was therefore talking to a host that did not exist.
+#
+#  ONE implementation. If the agent VM needs to change, change
+#  agent/bootstrap.sh — it is idempotent, it runs by hand as well as from
+#  user-data, and it is the thing that gets rehearsed.
+#
+#  ---------------------------------------------------------------------------
+#  READ THIS BEFORE YOU CHANGE ANYTHING HERE
+#  ---------------------------------------------------------------------------
+#  THIS HOST IS ASSUMED COMPROMISED. That is the threat model, not a worry.
+#  A pre-1.0 Go binary whose own README says it "may have unresolved network
+#  security issues" runs here, and an LLM decides what it executes.
+#
+#  So the design goal is not to keep this host clean. It is to make owning it
+#  worthless. Inventory of every secret on this box after bootstrap:
+#
+#      SDM_ADMIN_TOKEN   the agent's StrongDM service account token
+#      OPENAI_API_KEY    the model key
+#
+#  That is the complete list. There is NO database password, NO SSH private
+#  key, NO GitHub PAT, NO Grafana service account token and NO MCP caller
+#  bearer. The Grafana credentials live on mcp-host, in the private subnet,
+#  which this host has no route to (§4.4).
+#
+#  On stage: ssh in, run `env | grep -iE 'pass|pgpass'`, and let the empty
+#  output do the talking. That is Moment 1.
+#
+#  And the StrongDM token is not a skeleton key either — it authenticates the
+#  agent as itself, and every action it then takes is authorized per-action
+#  against Cedar and recorded. Stealing it gets you the agent's mandate, which
+#  policies 10/20/30/40 have already made small.
+# =============================================================================
+set -euo pipefail
+
+exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
+echo "=== nightshift agent-vm bootstrap $(date -Is) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update -y
+apt-get install -y curl unzip jq git ca-certificates
+
+# StrongDM-generated SSH key for the human operator path. StrongDM retains the
+# private key; this host receives only the public half.
+install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+cat >/home/ubuntu/.ssh/authorized_keys <<'KEYEOF'
+${agent_ssh_public_key}
+KEYEOF
+chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys
+chmod 0600 /home/ubuntu/.ssh/authorized_keys
+
+# --- AWS CLI v2 --------------------------------------------------------------
+#  Needed here for exactly one thing: reading the two SSM parameters below.
+#  agent/bootstrap.sh installs everything else.
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+# --- Secrets, fetched at boot from SSM, never baked into user-data -----------
+#  An attacker who reads user-data off the metadata service learns a parameter
+#  path, not a token.
+echo "--- fetching agent service-account token"
+SDM_ADMIN_TOKEN="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${sdm_token_ssm_path}' \
+  --with-decryption --query 'Parameter.Value' --output text)"
+
+if [ -z "$SDM_ADMIN_TOKEN" ] || [ "$SDM_ADMIN_TOKEN" = "None" ]; then
+  echo "FATAL: no agent token at ${sdm_token_ssm_path}."
+  echo "       Create a token for the nightshift-agent service account, then:"
+  echo "         aws ssm put-parameter --name ${sdm_token_ssm_path} --type SecureString --value '<token>' --overwrite"
+  echo "       Then: terraform apply -replace=aws_instance.agent_vm"
+  exit 1
+fi
+
+echo "--- fetching model API key"
+OPENAI_API_KEY="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${openai_key_ssm_path}' \
+  --with-decryption --query 'Parameter.Value' --output text)"
+
+# --- The repository ----------------------------------------------------------
+#  agent/bootstrap.sh can clone this itself given NIGHTSHIFT_REPO_URL, but doing
+#  it here means the failure is visible in the cloud-init log with a useful
+#  message rather than inside someone else's script.
+REPO_URL='${nightshift_repo_url}'
+REPO_REF='${nightshift_repo_ref}'
+CHECKOUT_DIR=/opt/SDMChallenge
+
+if [ -z "$REPO_URL" ]; then
+  echo "FATAL: nightshift_repo_url is empty."
+  echo "       The agent VM builds itself from this repository. Set it in"
+  echo "       terraform.tfvars (or TF_VAR_nightshift_repo_url) to a clone URL"
+  echo "       this host can read without credentials, then:"
+  echo "         terraform apply -replace=aws_instance.agent_vm"
+  exit 1
+fi
+
+echo "--- cloning $REPO_URL ($REPO_REF)"
+rm -rf "$CHECKOUT_DIR"
+git clone --depth 1 --branch "$REPO_REF" "$REPO_URL" "$CHECKOUT_DIR" || {
+  echo "FATAL: could not clone $REPO_URL at ref $REPO_REF."
+  echo "       If the repository is private, bake the checkout into an AMI"
+  echo "       instead — do NOT put a deploy key on this host. It is the one"
+  echo "       host in this build we assume is already owned."
+  exit 1
+}
+
+# --- Hand over to the canonical installer ------------------------------------
+#  Everything from here — picoclaw ${picoclaw_version}, the sdm client, the
+#  config, the workspace wrappers, .security.yml, the task shim and the three
+#  systemd units — is agent/bootstrap.sh's job.
+#
+#  The resource names below are passed through so the `sdm connect` calls in
+#  nightshift-sdm-up match the sdm_resource names Terraform actually created.
+echo "--- running agent/bootstrap.sh"
+chmod +x "$CHECKOUT_DIR/agent/bootstrap.sh"
+
+env \
+  SDM_ADMIN_TOKEN="$SDM_ADMIN_TOKEN" \
+  OPENAI_API_KEY="$OPENAI_API_KEY" \
+  PICOCLAW_VERSION='${picoclaw_version}' \
+  PG_READ_RESOURCE='${pg_read_resource_name}' \
+  PG_REMEDIATION_RESOURCE='${pg_remediation_resource_name}' \
+  GRAFANA_MCP_RESOURCE='${grafana_mcp_name}' \
+  GITHUB_MCP_RESOURCE='${github_mcp_name}' \
+  GITHUB_REPO='${github_repo}' \
+  AGENT_USER=ubuntu \
+  "$CHECKOUT_DIR/agent/bootstrap.sh"
+
+unset SDM_ADMIN_TOKEN OPENAI_API_KEY
+
+# =============================================================================
+#  REMAINING MANUAL STEPS ON THIS HOST
+#
+#  Enumerate the real MCP tool names and reconcile policy 40:
+#     §7.1, and it is not optional. Policy 40 matches the MCP tool name EXACTLY,
+#     and a mismatch does not error; the policy silently never fires and the
+#     agent merges to main in front of the customer.
+#
+#     Grafana's tool names have CHURNED — the alerting tools were consolidated,
+#     and names like `list_alert_rules` no longer exist — so run this against
+#     the PINNED grafana/mcp-grafana tag, and run it again after every bump.
+#
+#         picoclaw mcp show grafana
+#         picoclaw mcp show github
+#
+#  4. ./scripts/verify.sh — the pre-flight checklist. Run it every time.
+# =============================================================================
+
+echo "=== nightshift agent-vm bootstrap complete $(date -Is) ==="

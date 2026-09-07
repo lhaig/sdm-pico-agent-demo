@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Project Nightshift — sdm-relay bootstrap
+#
+#  Rendered by templatefile() from 20-compute.tf.
+#
+#  THIS HOST HAS NO INBOUND FIREWALL RULES AT ALL.
+#  Look at aws_security_group.sdm_relay in 10-network.tf: there is not a single
+#  ingress rule. The relay dials OUT to the gateway and to the control plane and
+#  holds those connections open; every byte of database and SSH traffic flows
+#  back down a tunnel this host established.
+#
+#  That is why RDS and the app servers need no inbound rule from the internet,
+#  from a bastion, or from StrongDM's own infrastructure. When a network
+#  architect asks "what do we have to open?", the answer is nothing, and this
+#  file plus that security group is the proof.
+#
+#  Egress via the NAT gateway, so this bootstrap depends on the NAT being up —
+#  hence the depends_on in 20-compute.tf.
+# =============================================================================
+set -euo pipefail
+
+exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
+echo "=== nightshift sdm-relay bootstrap $(date -Is) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+# Retry apt: the NAT gateway occasionally becomes routable a few seconds after
+# the instance does, and a demo should not fail on a race that a loop fixes.
+for i in 1 2 3 4 5; do
+  if apt-get update -y; then break; fi
+  echo "apt-get update failed (attempt $i) — waiting for NAT"
+  sleep 10
+done
+
+apt-get install -y curl unzip jq ca-certificates postgresql-client
+
+# --- AWS CLI v2 --------------------------------------------------------------
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+# --- Fetch the node token ----------------------------------------------------
+echo "--- fetching relay token from SSM: ${token_ssm_path}"
+SDM_TOKEN="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${token_ssm_path}' \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text)"
+
+if [ -z "$SDM_TOKEN" ] || [ "$SDM_TOKEN" = "None" ]; then
+  echo "FATAL: no relay token at ${token_ssm_path}."
+  echo "       Create the relay node in the StrongDM Admin UI, then:"
+  echo "         aws ssm put-parameter --name ${token_ssm_path} --type SecureString --value '<token>' --overwrite"
+  exit 1
+fi
+
+# --- Install and register ----------------------------------------------------
+echo "--- installing StrongDM node software"
+cd /tmp
+curl -fsSL -J -O https://app.strongdm.com/releases/cli/install
+sh ./install
+
+echo "--- registering relay (outbound only — no listener)"
+sdm install \
+  --relay \
+  --token="$SDM_TOKEN" \
+  --daemon
+
+unset SDM_TOKEN
+
+systemctl enable sdm-proxy || true
+systemctl restart sdm-proxy || true
+
+sleep 5
+echo "--- relay status"
+systemctl status sdm-proxy --no-pager || true
+
+# psql is installed above purely so you can prove reachability by hand during
+# setup. Nothing in the demo path uses it.
+echo "=== nightshift sdm-relay bootstrap complete $(date -Is) ==="

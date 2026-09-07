@@ -1,0 +1,8 @@
+# The real credential file. Only .security.yml.example belongs in git.
+.security.yml
+
+# Runtime workspace state — never commit the agent's session history or notes.
+workspace/sessions/
+workspace/memory/MEMORY.md
+workspace/cron/
+__pycache__/

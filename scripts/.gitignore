@@ -1,0 +1,6 @@
+# Operator configuration contains the shim bearer and local API tokens.
+# Never commit it.
+.env
+.live-demo-state
+.live-demo-ssh
+.sdm-ssh-config

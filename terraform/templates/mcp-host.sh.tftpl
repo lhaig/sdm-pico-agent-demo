@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Project Nightshift — mcp-host bootstrap  (Docker + grafana/mcp-grafana)
+#
+#  Rendered by templatefile() from 20-compute.tf.
+# =============================================================================
+#
+#  WHAT THIS HOST IS FOR
+#  ---------------------
+#  It runs ONE container: the self-hosted Grafana MCP server, listening on
+#  :${mcp_port} in the private subnet. StrongDM's relay is the only thing whose
+#  security group can open a connection to it (§4.4).
+#
+#  The agent VM cannot reach this host. There is no route and no security group
+#  rule. That is what makes the policy layer in front of these tools an actual
+#  control rather than a convention — the agent is not choosing to go through
+#  StrongDM, there is nothing else for it to choose.
+#
+#  TWO CREDENTIALS LIVE HERE, AND NEITHER IS ON THE AGENT
+#  ------------------------------------------------------
+#      GRAFANA_SERVICE_ACCOUNT_TOKEN   glsa_… — this container -> Grafana Cloud
+#      MCP_GRAFANA_SERVER_TOKEN        the caller bearer that StrongDM presents
+#
+#  Both are fetched from SSM at boot with the instance role. Neither is
+#  interpolated into user-data, because user-data is readable from the instance
+#  metadata service by anything running on this host, containers included.
+#
+#  ---------------------------------------------------------------------------
+#  THE TWO FLAGS THAT COST PEOPLE AN HOUR (§4.4, §7.3)
+#  ---------------------------------------------------------------------------
+#
+#  1. `--transport` DEFAULTS TO `stdio`.
+#     stdio is a subprocess protocol. MCP Gateway cannot front it at all — the
+#     resource is simply unreachable and Act 3 is dead. `-t streamable-http` is
+#     MANDATORY and it is the single most likely thing to be missing if the
+#     agent cannot see any Grafana tools.
+#
+#  2. `--allowed-origins` IS EMPTY BY DEFAULT, AND EMPTY MEANS "REJECT ANY
+#     REQUEST THAT CARRIES AN `Origin` HEADER AT ALL."
+#     Not "no restriction". The failure is a 403 that reads exactly like a
+#     network fault, on a host you cannot SSH into, behind a proxy. Set it
+#     explicitly. It is var.mcp_grafana_allowed_origins so you can tighten it
+#     without editing this file.
+#
+#  Endpoint path defaults to /mcp; sdm_resource.grafana_mcp's URL assumes that.
+#
+#  ---------------------------------------------------------------------------
+#  PIN THE IMAGE TAG. THIS IS NOT A STYLE PREFERENCE.
+#  ---------------------------------------------------------------------------
+#  policies/40-mcp-tool-limits.cedar forbids MCP tools BY NAME, matched exactly,
+#  and a name that does not match does not error — the forbid silently never
+#  fires and the agent resolves the incident in front of the customer.
+#
+#  Grafana's MCP tool set has churned materially: the alerting tools were
+#  consolidated and older names like `list_alert_rules` no longer exist. An
+#  image bump can therefore turn a working policy into a decorative one with no
+#  signal anywhere. After ANY bump, re-run `picoclaw mcp show grafana` and
+#  reconcile policy 40 (§7.1 step 11).
+# =============================================================================
+set -euo pipefail
+
+exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
+echo "=== nightshift mcp-host bootstrap $(date -Is) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+# This host reaches the internet via the NAT gateway, which can become routable
+# a few seconds after the instance boots.
+for i in 1 2 3 4 5; do
+  if apt-get update -y; then break; fi
+  echo "apt-get update failed (attempt $i) — waiting for NAT"
+  sleep 10
+done
+
+apt-get install -y ca-certificates curl unzip jq docker.io
+
+systemctl enable --now docker
+
+# --- AWS CLI v2 --------------------------------------------------------------
+#  Needed for exactly one thing: reading the two SSM parameters below.
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+
+# =============================================================================
+#  Secrets, fetched at boot. Never baked into user-data.
+# =============================================================================
+echo "--- fetching Grafana service account token"
+GRAFANA_TOKEN="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${grafana_token_ssm_path}' \
+  --with-decryption --query 'Parameter.Value' --output text)"
+
+if [ -z "$GRAFANA_TOKEN" ] || [ "$GRAFANA_TOKEN" = "None" ]; then
+  echo "FATAL: no Grafana service account token at ${grafana_token_ssm_path}."
+  echo "       Terraform creates this parameter from"
+  echo "       var.grafana_service_account_token — if it is missing, the apply"
+  echo "       did not run or the instance role cannot read it."
+  exit 1
+fi
+
+case "$GRAFANA_TOKEN" in
+  glsa_*) : ;;
+  *) echo "WARNING: the token at ${grafana_token_ssm_path} does not start with 'glsa_'."
+     echo "         A Cloud Access Policy token is a DIFFERENT credential and will"
+     echo "         401 against ${grafana_url}. See 00-providers.tf." ;;
+esac
+
+echo "--- fetching MCP caller bearer"
+CALLER_TOKEN="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${caller_token_ssm_path}' \
+  --with-decryption --query 'Parameter.Value' --output text)"
+
+if [ -z "$CALLER_TOKEN" ] || [ "$CALLER_TOKEN" = "None" ]; then
+  echo "FATAL: no MCP caller bearer at ${caller_token_ssm_path}."
+  echo "       This must equal the token StrongDM holds in"
+  echo "       sdm_resource.grafana_mcp — both come from"
+  echo "       var.mcp_caller_bearer_token, so they cannot disagree unless the"
+  echo "       parameter was edited by hand."
+  exit 1
+fi
+
+
+# =============================================================================
+#  The environment file.
+#
+#  Mode 0600, root-owned. Docker reads it with --env-file at start time; nothing
+#  else on this host needs it, and there are no unprivileged users here.
+#
+#  Deliberately NOT passed as `docker run -e KEY=value`: that puts both tokens
+#  into the container's `docker inspect` output and into the process arguments
+#  in `ps`, where anything on the host can read them.
+# =============================================================================
+umask 077
+install -d -m 0700 /etc/nightshift
+
+cat >/etc/nightshift/mcp-grafana.env <<ENVEOF
+# Written by user-data. Two credentials, two different hops (§4.4):
+#
+#   GRAFANA_SERVICE_ACCOUNT_TOKEN  this container -> Grafana Cloud
+#   MCP_GRAFANA_SERVER_TOKEN       StrongDM MCP Gateway -> this container
+#
+# Neither exists on the agent VM.
+GRAFANA_URL=${grafana_url}
+GRAFANA_SERVICE_ACCOUNT_TOKEN=$GRAFANA_TOKEN
+MCP_GRAFANA_SERVER_TOKEN=$CALLER_TOKEN
+ENVEOF
+
+chown root:root /etc/nightshift/mcp-grafana.env
+chmod 0600 /etc/nightshift/mcp-grafana.env
+umask 022
+
+unset GRAFANA_TOKEN CALLER_TOKEN
+
+
+# =============================================================================
+#  Pull the PINNED image.
+#
+#  Pulled explicitly, before the run, so that a Docker Hub problem shows up here
+#  in the bootstrap log with a clear message rather than as a container that
+#  will not start for a reason you have to go and find.
+# =============================================================================
+echo "--- pulling ${mcp_image}"
+for i in 1 2 3; do
+  if docker pull '${mcp_image}'; then break; fi
+  echo "docker pull failed (attempt $i)"
+  sleep 10
+done
+
+if ! docker image inspect '${mcp_image}' >/dev/null 2>&1; then
+  echo "FATAL: could not pull ${mcp_image}."
+  echo "       Check the NAT gateway route and that the tag exists."
+  exit 1
+fi
+
+
+# =============================================================================
+#  Run it.
+#
+#  --restart=always plus a systemd unit that reconciles on boot: Docker's
+#  restart policy handles the container dying, the unit handles the HOST being
+#  stopped and started between rehearsals, which is the case that actually bites
+#  you the morning of a demo.
+#
+#  -p 0.0.0.0:${mcp_port}:${mcp_port} binds every interface, which is correct
+#  ONLY because aws_security_group.mcp_host permits ingress from the StrongDM
+#  relay's security group and from nothing else. The network boundary is the
+#  security group, not the bind address. If you ever move this container to a
+#  host with a public IP, that stops being true.
+# =============================================================================
+cat >/usr/local/bin/nightshift-mcp-grafana <<'RUNEOF'
+#!/usr/bin/env bash
+# Start (or restart) the mcp-grafana container. Idempotent.
+set -euo pipefail
+
+IMAGE="__MCP_IMAGE__"
+PORT="__MCP_PORT__"
+ORIGINS="__MCP_ALLOWED_ORIGINS__"
+NAME="mcp-grafana"
+
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+exec docker run \
+  --name "$NAME" \
+  --restart=always \
+  --env-file /etc/nightshift/mcp-grafana.env \
+  -p "0.0.0.0:$PORT:$PORT" \
+  -d \
+  "$IMAGE" \
+  -t streamable-http \
+  --address "0.0.0.0:$PORT" \
+  --allowed-hosts "*" \
+  --allowed-origins "$ORIGINS"
+RUNEOF
+
+# Substituted rather than interpolated directly so the heredoc above can stay
+# quoted — nothing in that script should be expanded by user-data's shell.
+sed -i \
+  -e "s|__MCP_IMAGE__|${mcp_image}|" \
+  -e "s|__MCP_PORT__|${mcp_port}|" \
+  -e "s|__MCP_ALLOWED_ORIGINS__|${mcp_allowed_origins}|" \
+  /usr/local/bin/nightshift-mcp-grafana
+chmod 0755 /usr/local/bin/nightshift-mcp-grafana
+
+cat >/etc/systemd/system/nightshift-mcp-grafana.service <<'UNITEOF'
+[Unit]
+Description=grafana/mcp-grafana container (self-hosted MCP server, private subnet)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Docker's own --restart=always handles the container crashing. This unit exists
+# for the other case: the HOST being stopped and started between rehearsals.
+ExecStart=/usr/local/bin/nightshift-mcp-grafana
+ExecStop=/usr/bin/docker stop mcp-grafana
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+
+systemctl daemon-reload
+systemctl enable --now nightshift-mcp-grafana.service \
+  || echo "WARNING: nightshift-mcp-grafana failed to start — journalctl -u nightshift-mcp-grafana"
+
+
+# =============================================================================
+#  Say plainly whether this host is actually serving.
+#
+#  The check below is deliberately an UNAUTHENTICATED request. mcp-grafana
+#  should answer it with 401 — that is the caller bearer doing its job, before
+#  any tool runs. A 200 here would mean MCP_GRAFANA_SERVER_TOKEN did not take
+#  effect and the MCP server is open to anything that can reach the port.
+#
+#  A connection refused means the container is not up. A 403 means
+#  --allowed-origins is rejecting you (curl does not send Origin, so it should
+#  not, but that is the flag to look at if it does).
+# =============================================================================
+sleep 5
+CODE="$(curl -s -o /dev/null -w '%%{http_code}' \
+          -X POST \
+          -H 'Content-Type: application/json' \
+          -H 'Accept: application/json, text/event-stream' \
+          -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+          "http://127.0.0.1:${mcp_port}/mcp" || echo 000)"
+
+echo "--- unauthenticated tools/list on :${mcp_port} returned $CODE (expect 401)"
+if [ "$CODE" = "200" ]; then
+  echo "WARNING: the MCP server answered an UNAUTHENTICATED request."
+  echo "         MCP_GRAFANA_SERVER_TOKEN is not being enforced. Anything that"
+  echo "         reaches this port can drive Grafana with the service account"
+  echo "         token. Check /etc/nightshift/mcp-grafana.env and the container"
+  echo "         arguments before you present."
+fi
+
+docker ps --filter name=mcp-grafana --format '    {{.Image}}  {{.Status}}  {{.Ports}}' || true
+
+echo "=== nightshift mcp-host bootstrap complete $(date -Is) ==="

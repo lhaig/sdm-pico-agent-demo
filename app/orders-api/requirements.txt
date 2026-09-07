@@ -1,0 +1,8 @@
+# orders-api runtime dependencies.
+# Pinned: this box gets snapshotted into an AMI once it works (see the
+# "PicoClaw is pre-1.0 / snapshot the AMI" note in the build plan). A floating
+# dependency that changes between rehearsals is a demo you get to debug on stage.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+psycopg2-binary==2.9.10

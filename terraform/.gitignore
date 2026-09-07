@@ -1,0 +1,22 @@
+# =============================================================================
+#  Terraform state contains the RDS password, both MCP tokens and the StrongDM
+#  resource secrets IN PLAINTEXT. Never commit it.
+# =============================================================================
+
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+crash.*.log
+
+# Real variable values. terraform.tfvars.example is the committed template.
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+
+# Plan files embed variable values, secrets included.
+*.tfplan
+plan.out
+
+# Lambda build artefact, produced by the archive_file data source.
+.build/

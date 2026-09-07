@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Project Nightshift — sdm-gateway bootstrap
+#
+#  Rendered by templatefile() from 20-compute.tf. Runs once, as root, at first
+#  boot. Output lands in /var/log/cloud-init-output.log — that is the first
+#  place to look when the gateway does not come online.
+#
+#  THE TOKEN NEVER APPEARS IN THIS FILE.
+#  Terraform writes the provider's sensitive computed token to SSM. This script
+#  fetches it at boot using the instance role. Two consequences worth knowing:
+#
+#    * The token is in encrypted Terraform state, but not in plan output or the
+#      user-data blob that anything on this host can read from the IMDS.
+#    * If the SSM parameter is missing, this script fails LOUDLY and early
+#      rather than leaving you with a half-registered node.
+#
+#  Prerequisite (README step 3):
+#      aws ssm put-parameter --name '${token_ssm_path}' \
+#        --type SecureString --value '<gateway token>' --overwrite
+# =============================================================================
+set -euo pipefail
+
+exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
+echo "=== nightshift sdm-gateway bootstrap $(date -Is) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update -y
+apt-get install -y curl unzip jq ca-certificates
+
+# --- AWS CLI v2 (Ubuntu 24.04 ships no aws CLI by default) -------------------
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+# --- Fetch the node token ----------------------------------------------------
+echo "--- fetching gateway token from SSM: ${token_ssm_path}"
+SDM_TOKEN="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${token_ssm_path}' \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text)"
+
+if [ -z "$SDM_TOKEN" ] || [ "$SDM_TOKEN" = "None" ]; then
+  echo "FATAL: no gateway token at ${token_ssm_path}."
+  echo "       Create the node in the StrongDM Admin UI, then:"
+  echo "         aws ssm put-parameter --name ${token_ssm_path} --type SecureString --value '<token>' --overwrite"
+  exit 1
+fi
+
+# --- Install the StrongDM node ----------------------------------------------
+#  ONE BINARY FOR BOTH ROLES. `sdm install --relay` registers a node; whether
+#  that node behaves as a gateway (public listener) or a relay (outbound only)
+#  is decided by the TOKEN, which was minted against the gateway node object in
+#  40-strongdm-nodes.tf. The flag name is a historical artefact — do not read
+#  anything into it.
+echo "--- installing StrongDM node software"
+cd /tmp
+curl -fsSL -J -O https://app.strongdm.com/releases/cli/install
+sh ./install
+
+echo "--- registering node (gateway listener on :${listen_port})"
+sdm install \
+  --relay \
+  --token="$SDM_TOKEN" \
+  --daemon
+
+# The token has done its job. Take it out of the shell's environment; the
+# systemd unit written by the installer holds its own copy.
+unset SDM_TOKEN
+
+systemctl enable sdm-proxy || true
+systemctl restart sdm-proxy || true
+
+# --- Sanity output for the operator -----------------------------------------
+sleep 5
+echo "--- node status"
+systemctl status sdm-proxy --no-pager || true
+ss -lntp | grep -E ':${listen_port}\b' || echo "WARNING: nothing listening on ${listen_port} yet — give it 30s and re-check"
+
+echo "=== nightshift sdm-gateway bootstrap complete $(date -Is) ==="

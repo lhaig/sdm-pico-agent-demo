@@ -1,0 +1,486 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  Project Nightshift — app-server bootstrap  (${hostname}, orders-api)
+#
+#  Rendered by templatefile() from 20-compute.tf.
+#
+#  ---------------------------------------------------------------------------
+#  THE IMPORTANT PART OF THIS FILE IS THE authorized_keys BLOCK BELOW
+#  ---------------------------------------------------------------------------
+#  StrongDM generated an ed25519 keypair for this host's SSH resource and
+#  exposed only the PUBLIC half as a computed attribute. That public key is
+#  interpolated below and appended to ubuntu's authorized_keys.
+#
+#  StrongDM never releases the private half. To anyone. Which means:
+#
+#      THERE IS NO SSH PRIVATE KEY ANYWHERE IN THIS BUILD.
+#
+#  Not on the agent VM, not in Terraform state, not in a secrets manager, and not
+#  on the presenter's laptop. The agent role is not granted these resources.
+#
+#  This is step 4 of §7.1, automated.
+#
+#  ---------------------------------------------------------------------------
+#  AND THE SECOND-MOST IMPORTANT PART: THIS DEPLOYS THE REAL APPLICATION
+#  ---------------------------------------------------------------------------
+#  This file used to write a ~60-line inline HTTP stub that listened on :3000,
+#  faulted on the presence of /opt/orders-api/FAULT, and never opened a database
+#  connection at all. That made app/poison.sql — the entire incident — a no-op
+#  against the deployed service, while AGENT.md, HEARTBEAT.md, verify.sh and
+#  break-it.sh all curled :8080/orders, /metrics and /debug/last-errors on a
+#  host where nothing was listening on 8080.
+#
+#  So: the real app/orders-api/main.py is embedded below (by templatefile, from
+#  the repository, at plan time — no clone, no network dependency, no drift),
+#  installed into a venv from the pinned requirements.txt, and run by the
+#  provided systemd unit on ${app_listen_port}.
+#
+#  The fault is now the honest one: poisoned rows in public.orders raise a real
+#  TypeError/KeyError in enrich_order, /orders 500s, and the traceback the agent
+#  reads over `sdm ssh` points at the real cause.
+# =============================================================================
+set -euo pipefail
+
+exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
+echo "=== nightshift ${hostname} bootstrap $(date -Is) ==="
+
+export DEBIAN_FRONTEND=noninteractive
+
+hostnamectl set-hostname ${hostname}
+
+# Retry: this host reaches the internet via the NAT gateway, which may become
+# routable a few seconds after the instance boots.
+for i in 1 2 3 4 5; do
+  if apt-get update -y; then break; fi
+  echo "apt-get update failed (attempt $i) — waiting for NAT"
+  sleep 10
+done
+
+apt-get install -y curl unzip jq ca-certificates \
+                   python3 python3-venv python3-dev build-essential \
+                   libpq-dev postgresql-client
+
+# --- AWS CLI v2 --------------------------------------------------------------
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+
+# =============================================================================
+#  StrongDM SSH public key -> authorized_keys
+#
+#  Idempotent: appended only if absent, so re-running user-data does not grow
+#  the file. Permissions matter — sshd silently ignores a world-writable
+#  authorized_keys and you get "Permission denied (publickey)" with no clue why.
+# =============================================================================
+SDM_PUBKEY='${sdm_public_key}'
+AUTH_KEYS=/home/ubuntu/.ssh/authorized_keys
+
+install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+touch "$AUTH_KEYS"
+
+if ! grep -qF "$SDM_PUBKEY" "$AUTH_KEYS"; then
+  echo "" >> "$AUTH_KEYS"
+  echo "# StrongDM-managed key for ${hostname} — private half never leaves the control plane" >> "$AUTH_KEYS"
+  echo "$SDM_PUBKEY" >> "$AUTH_KEYS"
+  echo "--- appended StrongDM public key"
+else
+  echo "--- StrongDM public key already present"
+fi
+
+chown ubuntu:ubuntu "$AUTH_KEYS"
+chmod 0600 "$AUTH_KEYS"
+
+
+# =============================================================================
+#  orders-api — the real application
+# =============================================================================
+
+# --- service account ---------------------------------------------------------
+#  The unit runs as `orders`, not as ubuntu and not as root. The agent SSHes in
+#  as ubuntu and can read the journal; it cannot read /etc/orders-api.env, which
+#  is the only file on this host holding a database password.
+if ! id orders >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /opt/orders-api --shell /usr/sbin/nologin orders
+fi
+install -d -m 0755 -o orders -g orders /opt/orders-api
+
+# --- application code --------------------------------------------------------
+#  Embedded verbatim from app/orders-api/ by templatefile(). Quoted heredoc
+#  delimiters, so nothing in the Python is expanded by the shell.
+echo "--- writing /opt/orders-api/main.py"
+cat >/opt/orders-api/main.py <<'ORDERSAPIMAINEOF'
+${orders_api_main_py}
+ORDERSAPIMAINEOF
+
+echo "--- writing /opt/orders-api/requirements.txt"
+cat >/opt/orders-api/requirements.txt <<'ORDERSAPIREQEOF'
+${orders_api_requirements}
+ORDERSAPIREQEOF
+
+chown -R orders:orders /opt/orders-api
+
+# --- virtualenv --------------------------------------------------------------
+#  Pinned dependencies (fastapi/uvicorn/psycopg2-binary). The box gets
+#  snapshotted into an AMI once it works; a floating dependency that changes
+#  between rehearsals is a demo you get to debug on stage.
+echo "--- building the venv"
+python3 -m venv /opt/orders-api/venv
+/opt/orders-api/venv/bin/pip install --quiet --upgrade pip
+/opt/orders-api/venv/bin/pip install --quiet -r /opt/orders-api/requirements.txt
+chown -R orders:orders /opt/orders-api/venv
+
+# --- database credential -----------------------------------------------------
+#  THE APPLICATION'S OWN path to the database, and the honest asymmetry the demo
+#  rests on: app-01/app-02 hold a real credential because they are the
+#  application's hosts. The AGENT VM holds nothing equivalent and reaches the
+#  same database only through StrongDM.
+#
+#  The instance role permits secretsmanager:GetSecretValue on exactly this one
+#  secret and nothing else.
+echo "--- fetching the database credential"
+DB_SECRET_JSON="$(aws secretsmanager get-secret-value \
+  --region '${aws_region}' \
+  --secret-id '${db_secret_arn}' \
+  --query SecretString --output text)" || DB_SECRET_JSON=""
+
+if [ -z "$DB_SECRET_JSON" ]; then
+  echo "WARNING: could not read ${db_secret_arn}."
+  echo "         orders-api will start and fail its database checks. Fix the"
+  echo "         secret, then: systemctl restart orders-api"
+  DB_USER=""; DB_PASS=""
+else
+  DB_USER="$(printf '%s' "$DB_SECRET_JSON" | jq -r '.username // empty')"
+  DB_PASS="$(printf '%s' "$DB_SECRET_JSON" | jq -r '.password // empty')"
+fi
+
+# URL-encode the password: RDS master passwords legitimately contain characters
+# that would otherwise terminate the DSN.
+DB_PASS_ENC="$(printf '%s' "$DB_PASS" | jq -sRr @uri)"
+
+umask 077
+cat >/etc/orders-api.env <<ENVEOF
+# /etc/orders-api.env — written by user-data on ${hostname}.
+#
+# This IS a real production credential, and it is correct that it lives here:
+# these are the application's own hosts. If you ever find its equivalent on the
+# agent VM, the demo is broken — that is the entire claim.
+SHOPFRONT_URL=postgresql://$DB_USER:$DB_PASS_ENC@${db_host}:5432/${db_name}?sslmode=require
+
+ORDERS_API_HOST=0.0.0.0
+ORDERS_API_PORT=${app_listen_port}
+ORDERS_API_POOL_MIN=1
+ORDERS_API_POOL_MAX=8
+
+AWS_REGION=${aws_region}
+ENVEOF
+umask 022
+
+chown root:orders /etc/orders-api.env
+chmod 0640 /etc/orders-api.env
+unset DB_SECRET_JSON DB_USER DB_PASS DB_PASS_ENC
+
+# --- systemd unit ------------------------------------------------------------
+#  The unit from app/orders-api/orders-api.service, verbatim. Its `--port` is
+#  rewritten from `app_listen_port` so that the unit, /etc/orders-api.env, the
+#  security group rule in 10-network.tf and everything that curls this host
+#  (AGENT.md, HEARTBEAT.md, verify.sh, break-it.sh) cannot drift apart.
+echo "--- writing /etc/systemd/system/orders-api.service"
+cat >/etc/systemd/system/orders-api.service <<'ORDERSAPIUNITEOF'
+${orders_api_unit}
+ORDERSAPIUNITEOF
+
+sed -i "s/--port [0-9][0-9]*/--port ${app_listen_port}/" /etc/systemd/system/orders-api.service
+
+
+# =============================================================================
+#  METRICS -> GRAFANA CLOUD
+#
+#  THIS BLOCK REPLACED THE CLOUDWATCH PUBLISHER, AND THE CHOICE MADE HERE IS
+#  WORTH READING BEFORE YOU CHANGE IT.
+# =============================================================================
+#
+#  WHAT WAS HERE BEFORE
+#  --------------------
+#  A shell loop that curled orders-api's /metrics once a minute, computed the
+#  delta in `http_requests_5xx_total` since the previous scrape, and called
+#  `aws cloudwatch put-metric-data` to publish it as `Http5xxCount`. A
+#  CloudWatch alarm watched that, an SNS topic fanned out from the alarm, and a
+#  Lambda turned the SNS message into a PagerDuty incident.
+#
+#  All of that is gone (§4.1). The metric did not change — orders-api has always
+#  exposed `http_requests_5xx_total` in Prometheus exposition format on
+#  /metrics. What disappeared is everything that used to stand between that
+#  counter and the thing that alerts on it.
+#
+#  ---------------------------------------------------------------------------
+#  WHY `prometheus --agent` AND NOT SOMETHING ELSE
+#  ---------------------------------------------------------------------------
+#  Four options were on the table. The reasoning, briefly, because "why not
+#  Alloy?" is a fair question and you should be able to answer it:
+#
+#    1. Keep the shell loop, POST to Grafana instead.
+#       NOT POSSIBLE. Grafana Cloud has NO Prometheus push gateway. remote_write
+#       is a snappy-compressed protobuf protocol, not something you produce from
+#       bash and curl. This is the option people assume exists; it does not.
+#
+#    2. Add prometheus_client + a push library to orders-api.
+#       Rejected. It puts a Grafana Cloud credential inside the application
+#       process, and the application process is the thing the demo deliberately
+#       breaks. A failing service should not also be the thing responsible for
+#       reporting that it is failing.
+#
+#    3. Grafana Alloy.
+#       Correct, and what you would run for real. Rejected HERE because it is a
+#       larger install with a River/Alloy configuration language that nobody in
+#       the room is going to read off a slide, to do one job that Prometheus in
+#       agent mode does in nine lines of YAML. If this build ever grows logs and
+#       traces, switch to Alloy — that is the point at which it earns its
+#       footprint.
+#
+#    4. Prometheus in AGENT MODE.  <-- this
+#       One static binary. No local TSDB, no query API, no rule evaluation, no
+#       web UI worth attacking. It scrapes loopback and forwards. The config
+#       below is the whole thing and it fits on one screen, which matters when
+#       an architect asks "so what is actually running on your app servers?"
+#
+#  ---------------------------------------------------------------------------
+#  THE FLAG CHANGED BETWEEN MAJOR VERSIONS. THIS WILL CATCH SOMEBODY.
+#  ---------------------------------------------------------------------------
+#      Prometheus 3.x   --agent
+#      Prometheus 2.32+ --enable-feature=agent
+#
+#  The unit below uses the 3.x form, and var.prometheus_agent_version has a
+#  validation rule that refuses anything that is not 3.x for exactly that
+#  reason. If you deliberately drop to a 2.x pin, change both.
+#
+#  ---------------------------------------------------------------------------
+#  THE CREDENTIAL, AND WHY IT IS NOT IN THIS FILE
+#  ---------------------------------------------------------------------------
+#  remote_write authenticates with HTTP basic auth (§4.5):
+#
+#      username = the NUMERIC Prometheus instance ID   (NOT an email address —
+#                 this is the single most common 401 people hit)
+#      password = a Cloud Access Policy token scoped `metrics:write`
+#
+#  The username is not a secret and is interpolated below. The PASSWORD is
+#  fetched from SSM at boot and written to a file that only the `prometheus`
+#  user can read, and the config references it with `password_file` rather than
+#  inlining it. Two consequences worth having:
+#
+#    * the token never enters user-data, so it is not readable from the instance
+#      metadata service by anything that happens to be running on this host;
+#    * `cat /etc/prometheus-agent/prometheus.yml` — which the agent can do over
+#      `sdm ssh` as ubuntu — shows the endpoint and the account, and no secret.
+#
+#  THIS UNIT ALSO DOES NOT GET THE DATABASE CREDENTIAL. The publisher it
+#  replaced originally ran as `ubuntu` with EnvironmentFile=/etc/orders-api.env,
+#  which put the full RDS DSN into the environment of a process owned by the
+#  very identity the agent SSHes in as — one `cat /proc/<pid>/environ` from a
+#  live production database password, on the host whose entire purpose is to
+#  show that the agent never holds one. It runs as its own `prometheus` user
+#  with no env file at all.
+# =============================================================================
+
+# --- service account ---------------------------------------------------------
+if ! id prometheus >/dev/null 2>&1; then
+  useradd --system --no-create-home --shell /usr/sbin/nologin prometheus
+fi
+install -d -m 0750 -o prometheus -g prometheus /etc/prometheus-agent
+install -d -m 0750 -o prometheus -g prometheus /var/lib/prometheus-agent
+
+# --- the binary --------------------------------------------------------------
+#  PINNED (var.prometheus_agent_version). Same reasoning as everything else on
+#  these hosts: this box gets snapshotted into an AMI once it works, and a
+#  floating version that changes between rehearsals is a demo you debug on
+#  stage.
+PROM_VER='${prometheus_version}'
+PROM_DIR="prometheus-$PROM_VER.linux-amd64"
+PROM_URL="https://github.com/prometheus/prometheus/releases/download/v$PROM_VER/$PROM_DIR.tar.gz"
+
+if ! command -v prometheus >/dev/null 2>&1; then
+  echo "--- installing prometheus $PROM_VER (agent mode)"
+  for i in 1 2 3; do
+    if curl -fsSL "$PROM_URL" -o /tmp/prometheus.tar.gz; then break; fi
+    echo "prometheus download failed (attempt $i)"
+    sleep 10
+  done
+
+  if [ -s /tmp/prometheus.tar.gz ]; then
+    tar -xzf /tmp/prometheus.tar.gz -C /tmp
+    install -m 0755 -o root -g root "/tmp/$PROM_DIR/prometheus" /usr/local/bin/prometheus
+    rm -rf "/tmp/$PROM_DIR" /tmp/prometheus.tar.gz
+  else
+    echo "WARNING: could not download $PROM_URL"
+    echo "         No metrics will reach Grafana Cloud, so the alert rule will"
+    echo "         never fire and break-it.sh's wait path will time out."
+    echo "         scripts/trigger-agent.sh is unaffected."
+  fi
+fi
+
+# --- the remote_write password ------------------------------------------------
+#  SSM SecureString -> a 0600 file owned by prometheus. Never in user-data,
+#  never in the config file, never in the process arguments.
+echo "--- fetching the Grafana Cloud metrics-write token"
+RW_PASSWORD="$(aws ssm get-parameter \
+  --region '${aws_region}' \
+  --name '${metrics_write_token_ssm_path}' \
+  --with-decryption --query 'Parameter.Value' --output text 2>/dev/null)" || RW_PASSWORD=""
+
+if [ -z "$RW_PASSWORD" ] || [ "$RW_PASSWORD" = "None" ]; then
+  echo "WARNING: no metrics-write token at ${metrics_write_token_ssm_path}."
+  echo "         prometheus will start and every remote_write will 401. Fix the"
+  echo "         parameter, then: systemctl restart prometheus-agent"
+  RW_PASSWORD="MISSING-SEE-BOOTSTRAP-LOG"
+fi
+
+umask 077
+printf '%s' "$RW_PASSWORD" > /etc/prometheus-agent/remote-write-password
+umask 022
+chown prometheus:prometheus /etc/prometheus-agent/remote-write-password
+chmod 0600 /etc/prometheus-agent/remote-write-password
+unset RW_PASSWORD
+
+# --- the config ---------------------------------------------------------------
+#  Nine lines of substance. `job="orders-api"` is what the Grafana alert rule's
+#  PromQL selects on (see local.alert_expr in 96-grafana.tf) — change the job
+#  name here and the rule stops matching, silently, with no error anywhere.
+echo "--- writing /etc/prometheus-agent/prometheus.yml"
+cat >/etc/prometheus-agent/prometheus.yml <<'PROMCFGEOF'
+# Written by user-data on ${hostname}. Prometheus AGENT MODE:
+# scrape loopback, remote_write, keep nothing locally.
+#
+# There is no `rule_files` and no `alerting` block on purpose. Rules live in
+# Grafana (terraform/96-grafana.tf), where the agent can read the resulting
+# incident over MCP. Evaluating them here would put the alert somewhere the
+# demo cannot show it.
+
+global:
+  scrape_interval: ${prometheus_scrape_interval}
+
+  # 15s rather than the usual 60s: the whole chain in §6 is scrape +
+  # remote_write + rule evaluation + notification, and 45 seconds saved at the
+  # front of it is 45 seconds you are not standing still in front of a customer.
+  scrape_timeout: 5s
+
+  # Stamped onto every series. `env=prod` is narration you can point at; the
+  # others make it obvious which of the two app servers a sample came from when
+  # you are looking at the raw series in Explore.
+  external_labels:
+    env: prod
+    project: nightshift
+    host: ${hostname}
+
+scrape_configs:
+  - job_name: orders-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['127.0.0.1:${app_listen_port}']
+        labels:
+          instance: ${hostname}
+
+remote_write:
+  # Resolved from data.grafana_cloud_stack, NOT hardcoded. The path is always
+  # /api/prom/push; the host is prometheus-prod-NN-<region-slug>.grafana.net and
+  # the NN is not derivable from anything you know (§4.5).
+  - url: ${remote_write_url}
+
+    basic_auth:
+      # NUMERIC instance ID, not an email address.
+      username: '${remote_write_username}'
+      # A Cloud Access Policy token scoped metrics:write. By reference, so this
+      # file can be read over `sdm ssh` without leaking it.
+      password_file: /etc/prometheus-agent/remote-write-password
+
+    # Keep the demo's series count tiny and the ingest predictable. orders-api
+    # exposes about eight series; the free tier allows 10,000 active.
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: '(http_requests_.*|http_5xx_ratio|orders_.*|orders_api_.*|up|scrape_samples_scraped)'
+        action: keep
+PROMCFGEOF
+
+chown prometheus:prometheus /etc/prometheus-agent/prometheus.yml
+chmod 0640 /etc/prometheus-agent/prometheus.yml
+
+# --- the unit -----------------------------------------------------------------
+cat >/etc/systemd/system/prometheus-agent.service <<'PROMUNITEOF'
+[Unit]
+Description=Prometheus (agent mode) — scrape orders-api, remote_write to Grafana Cloud
+Documentation=https://prometheus.io/docs/prometheus/latest/feature_flags/
+After=network-online.target orders-api.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=prometheus
+Group=prometheus
+
+# --agent is the PROMETHEUS 3.x FLAG. On 2.32-2.x it was --enable-feature=agent.
+# var.prometheus_agent_version refuses anything that is not 3.x so these two
+# cannot silently disagree.
+#
+# --web.listen-address=127.0.0.1:9090 deliberately: agent mode still opens a
+# small HTTP endpoint, and there is no reason for it to be reachable from the
+# relay, from the other app server, or from anywhere else. Loopback only.
+#
+# NO EnvironmentFile. This process does not get the RDS DSN. The publisher it
+# replaced originally did, running as `ubuntu` — the identity the agent SSHes in
+# as — which put a live production database password one `cat /proc/<pid>/environ`
+# away from the agent.
+ExecStart=/usr/local/bin/prometheus \
+    --agent \
+    --config.file=/etc/prometheus-agent/prometheus.yml \
+    --storage.agent.path=/var/lib/prometheus-agent \
+    --web.listen-address=127.0.0.1:9090 \
+    --log.level=info
+
+Restart=always
+RestartSec=10s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/prometheus-agent
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=prometheus-agent
+
+[Install]
+WantedBy=multi-user.target
+PROMUNITEOF
+
+
+systemctl daemon-reload
+systemctl enable --now orders-api.service      || echo "WARNING: orders-api failed to start — journalctl -u orders-api"
+systemctl enable --now prometheus-agent.service || echo "WARNING: prometheus-agent failed to start — journalctl -u prometheus-agent"
+
+# Give uvicorn a moment, then say plainly whether this host is actually serving.
+sleep 5
+CODE="$(curl -s -o /dev/null -w '%%{http_code}' "http://127.0.0.1:${app_listen_port}/health" || echo 000)"
+echo "--- orders-api /health on :${app_listen_port} returned $CODE (expect 200)"
+
+# And whether the metric the alert rule reads is actually being exposed. If this
+# is empty, the Grafana rule has nothing to evaluate no matter how correct the
+# rest of the chain is.
+FIVEXX="$(curl -fsS --max-time 5 "http://127.0.0.1:${app_listen_port}/metrics" 2>/dev/null \
+          | awk '/^http_requests_5xx_total /{print $2}')"
+echo "--- http_requests_5xx_total on :${app_listen_port}/metrics = $${FIVEXX:-<absent>} (expect 0 on a healthy host)"
+
+# remote_write does not report success synchronously, so the honest check is
+# "did prometheus start and stay up". The authoritative check is on the other
+# end: scripts/verify.sh queries Grafana for the series.
+systemctl is-active --quiet prometheus-agent.service \
+  && echo "--- prometheus-agent running; confirm the series in Grafana Explore before you present" \
+  || echo "--- WARNING: prometheus-agent is NOT running. journalctl -u prometheus-agent -n 50"
+
+echo "=== nightshift ${hostname} bootstrap complete $(date -Is) ==="
