@@ -201,6 +201,39 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "db_read_password" {
+  description = "Password for the least-privilege shopfront_read database role."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.db_read_password) >= 24
+    error_message = "db_read_password must contain at least 24 characters."
+  }
+}
+
+variable "db_remediation_password" {
+  description = "Password for the column-limited shopfront_remediation database role."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.db_remediation_password) >= 24
+    error_message = "db_remediation_password must contain at least 24 characters."
+  }
+}
+
+variable "db_app_password" {
+  description = "Password for the read-only orders_api database role."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.db_app_password) >= 24
+    error_message = "db_app_password must contain at least 24 characters."
+  }
+}
+
 variable "db_instance_class" {
   description = "db.t4g.micro per §4.1. Graviton, cheapest thing that runs Postgres 16."
   type        = string

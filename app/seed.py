@@ -280,11 +280,14 @@ def snapshot(cur) -> None:
     foreign keys line up again.
     """
     cur.execute("CREATE SCHEMA IF NOT EXISTS pristine")
-    for table in ("customers", "orders", "payments"):
+    sources = {
+        "customers": "private.customer_pii",
+        "orders": "public.orders",
+        "payments": "public.payments",
+    }
+    for table, source in sources.items():
         cur.execute(f"DROP TABLE IF EXISTS pristine.{table}")
-        cur.execute(
-            f"CREATE TABLE pristine.{table} AS TABLE public.{table}"
-        )
+        cur.execute(f"CREATE TABLE pristine.{table} AS TABLE {source}")
         cur.execute(f"ANALYZE pristine.{table}")
 
 
@@ -334,15 +337,15 @@ def main() -> int:
     rng = random.Random(SEED)
 
     if args.truncate:
-        print("Truncating public.orders / public.payments / public.customers ...")
+        print("Truncating public.orders / public.payments / private.customer_pii ...")
         cur.execute(
-            "TRUNCATE public.payments, public.orders, public.customers "
+            "TRUNCATE public.payments, public.orders, private.customer_pii "
             "RESTART IDENTITY CASCADE"
         )
 
     print(f"Generating {args.customers:,} customers ...")
     n_cust = copy_rows(
-        cur, "public.customers",
+        cur, "private.customer_pii",
         ["id", "name", "email", "phone", "created_at", "tier"],
         gen_customers(rng, args.customers),
     )
@@ -372,8 +375,8 @@ def main() -> int:
     print(f"  loaded {n_pay:,} payments")
 
     print("ANALYZE ...")
-    for table in ("customers", "orders", "payments"):
-        cur.execute(f"ANALYZE public.{table}")
+    for table in ("private.customer_pii", "public.orders", "public.payments"):
+        cur.execute(f"ANALYZE {table}")
 
     if args.snapshot:
         print("Taking pristine snapshot (used by scripts/reset.sh) ...")

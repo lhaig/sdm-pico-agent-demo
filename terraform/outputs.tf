@@ -113,6 +113,7 @@ output "sdm_resource_ids" {
   value = {
     pg_prod_shopfront_read        = sdm_resource.pg_prod_shopfront_read.id
     pg_prod_shopfront_remediation = sdm_resource.pg_prod_shopfront_remediation.id
+    pg_prod_shopfront_admin       = sdm_resource.pg_prod_shopfront_admin.id
     agent_vm                      = sdm_resource.agent_vm.id
     app_01                        = sdm_resource.app_01.id
     app_02                        = sdm_resource.app_02.id

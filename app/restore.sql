@@ -36,11 +36,11 @@ BEGIN;
 
 -- Order matters: payments -> orders -> customers on the way down (FKs),
 -- customers -> orders -> payments on the way back up.
-TRUNCATE public.payments, public.orders, public.customers RESTART IDENTITY CASCADE;
+TRUNCATE public.payments, public.orders, private.customer_pii RESTART IDENTITY CASCADE;
 
-INSERT INTO public.customers SELECT * FROM pristine.customers;
-INSERT INTO public.orders    SELECT * FROM pristine.orders;
-INSERT INTO public.payments  SELECT * FROM pristine.payments;
+INSERT INTO private.customer_pii SELECT * FROM pristine.customers;
+INSERT INTO public.orders        SELECT * FROM pristine.orders;
+INSERT INTO public.payments      SELECT * FROM pristine.payments;
 
 -- Poison bookkeeping is demo scaffolding; clear it so the next run starts clean.
 -- The table is created by app/schema.sql, so it exists whether or not
@@ -51,7 +51,7 @@ TRUNCATE TABLE public.poison_backup;
 
 COMMIT;
 
-ANALYZE public.customers;
+ANALYZE private.customer_pii;
 ANALYZE public.orders;
 ANALYZE public.payments;
 

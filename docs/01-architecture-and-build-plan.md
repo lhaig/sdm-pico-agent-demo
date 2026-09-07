@@ -103,10 +103,11 @@ Before customer use, confirm in the actual organisation:
 `terraform apply` proves only that the API accepted the policy text. The strict
 preflight and a full rehearsal prove runtime behaviour.
 
-Redaction is result-column enforcement, not general SQL data-flow analysis. The
-demo preflight covers direct and aliased result columns; it does not claim that
-arbitrary derived expressions cannot encode source data. Use database-native
-views or column privileges when that stronger guarantee is required.
+Redaction is result-column enforcement, not general SQL data-flow analysis.
+Raw customer data therefore lives in `private.customer_pii`, which the agent's
+database identities cannot read. The public customer view emits fixed masks,
+so aliases and derived expressions remain safe even if they no longer match an
+`@redact` result-column identity. Preflight verifies both layers.
 
 The remediation policy is action-and-table scoped, not predicate scoped. The
 live driver requires one canonical audited statement, but Cedar does not bind a

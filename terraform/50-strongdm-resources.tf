@@ -29,6 +29,9 @@
 locals {
   pg_read_resource_name        = "pg-prod-shopfront-read"
   pg_remediation_resource_name = "pg-prod-shopfront-remediation"
+  pg_admin_resource_name       = "pg-prod-shopfront-admin"
+  pg_read_username             = "shopfront_read"
+  pg_remediation_username      = "shopfront_remediation"
   agent_vm_resource_name       = "agent-vm"
   app_01_resource_name         = "app-01"
   app_02_resource_name         = "app-02"
@@ -72,11 +75,9 @@ resource "sdm_resource" "agent_vm" {
 #
 #  THE CREDENTIAL HANDOFF, which is Moment 1:
 #
-#  The master username and password are passed to StrongDM here, once, at apply
-#  time. From that point the control plane holds them and injects them on the
-#  far side of the relay. The agent's client presents NO password — it connects
-#  to 127.0.0.1:5432 on its own host and StrongDM completes the real
-#  authentication out of its reach.
+#  Independent least-privilege credentials are passed to StrongDM at apply
+#  time. The agent's client presents NO password; StrongDM injects the correct
+#  database identity on the far side of the relay.
 #
 #  `env | grep -i PGPASSWORD` on the agent VM returns nothing.
 #
@@ -91,8 +92,8 @@ resource "sdm_resource" "pg_prod_shopfront_read" {
     port     = aws_db_instance.shopfront.port
     database = var.db_name
 
-    username      = var.db_username
-    password      = var.db_password
+    username      = local.pg_read_username
+    password      = var.db_read_password
     egress_filter = local.private_egress_filter
 
     bind_interface = "127.0.0.1"
@@ -112,14 +113,36 @@ resource "sdm_resource" "pg_prod_shopfront_remediation" {
     port     = aws_db_instance.shopfront.port
     database = var.db_name
 
-    username      = var.db_username
-    password      = var.db_password
+    username      = local.pg_remediation_username
+    password      = var.db_remediation_password
     egress_filter = local.private_egress_filter
 
     bind_interface = "127.0.0.1"
     port_override  = 5434
 
     tags = merge(local.prod_tags, { access = "remediation" })
+  }
+}
+
+# Human-only owner path for schema, seed, reset, and fault injection. The agent
+# role uses explicit resource IDs and never receives this resource; sre-oncall
+# inherits it from the env=prod tag.
+resource "sdm_resource" "pg_prod_shopfront_admin" {
+  postgres {
+    name = local.pg_admin_resource_name
+
+    hostname = aws_db_instance.shopfront.address
+    port     = aws_db_instance.shopfront.port
+    database = var.db_name
+
+    username      = var.db_username
+    password      = var.db_password
+    egress_filter = local.private_egress_filter
+
+    bind_interface = "127.0.0.1"
+    port_override  = 5433
+
+    tags = merge(local.prod_tags, { access = "admin" })
   }
 }
 

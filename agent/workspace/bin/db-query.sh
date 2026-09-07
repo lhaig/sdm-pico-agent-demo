@@ -84,7 +84,7 @@ if [[ $RC -eq 0 ]]; then
     exit 0
 fi
 
-if printf '%s' "$ERRTEXT" | grep -Eqi 'not permitted|not allowed|denied|forbid|policy|unauthori[sz]ed'; then
+if printf '%s' "$ERRTEXT" | grep -Eqi 'not permitted|not allowed|denied|forbid|policy|unauthori[sz]ed|autonomous agents cannot write'; then
     cat >&2 <<EOF
 POLICY DECISION: DENIED
 ${ERRTEXT}

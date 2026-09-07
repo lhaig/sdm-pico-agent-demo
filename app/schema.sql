@@ -7,8 +7,9 @@
 --
 --   * public.customers.email  and  public.customers.phone
 --       -> targeted by policies/20-redact-pii.cedar  (@redact("email"), @redact("phone"))
---          The query must SUCCEED and return rows; StrongDM masks these two
---          columns in flight so the LLM never receives the PII.
+--          StrongDM masks these columns in flight. The public view also emits
+--          fixed masks so aliases or expressions cannot expose the private
+--          backing table if protocol redaction is bypassed.
 --
 --   * public.orders
 --       -> the ONLY table the agent may ever write to, and only after a human
@@ -36,6 +37,7 @@ BEGIN;
 -- Schemas
 -- -----------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS public;
+CREATE SCHEMA IF NOT EXISTS private;
 
 -- `pristine` holds a byte-for-byte snapshot of the seeded data taken by
 -- seed.py *before* any fault injection. scripts/reset.sh restores from here,
@@ -44,23 +46,21 @@ CREATE SCHEMA IF NOT EXISTS public;
 CREATE SCHEMA IF NOT EXISTS pristine;
 
 -- -----------------------------------------------------------------------------
--- public.customers
+-- private.customer_pii and the safe public projection
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.customers (
+CREATE TABLE IF NOT EXISTS private.customer_pii (
     id          bigint       PRIMARY KEY,
     name        text         NOT NULL,
-    -- redacted in flight by Cedar policy 20 for principals in role ai-agents
     email       text         NOT NULL,
-    -- redacted in flight by Cedar policy 20 for principals in role ai-agents
     phone       text         NOT NULL,
     created_at  timestamptz  NOT NULL DEFAULT now(),
     tier        text         NOT NULL DEFAULT 'standard'
                              CHECK (tier IN ('standard', 'silver', 'gold', 'platinum'))
 );
 
-COMMENT ON TABLE  public.customers       IS 'Customer master. Contains PII (email, phone) redacted in flight for AI agents.';
-COMMENT ON COLUMN public.customers.email IS 'PII — masked by StrongDM policy 20-redact-pii.cedar';
-COMMENT ON COLUMN public.customers.phone IS 'PII — masked by StrongDM policy 20-redact-pii.cedar';
+COMMENT ON TABLE  private.customer_pii       IS 'Customer master. Raw PII is available only to the orders-api identity and database owner.';
+COMMENT ON COLUMN private.customer_pii.email IS 'Raw PII. Never grant the agent roles access to this table.';
+COMMENT ON COLUMN private.customer_pii.phone IS 'Raw PII. Never grant the agent roles access to this table.';
 
 -- -----------------------------------------------------------------------------
 -- public.orders
@@ -69,7 +69,7 @@ COMMENT ON COLUMN public.customers.phone IS 'PII — masked by StrongDM policy 2
 -- Malformed payloads are what turn this table into a production incident.
 CREATE TABLE IF NOT EXISTS public.orders (
     id            bigint       PRIMARY KEY,
-    customer_id   bigint       NOT NULL REFERENCES public.customers (id) ON DELETE RESTRICT,
+    customer_id   bigint       NOT NULL REFERENCES private.customer_pii (id) ON DELETE RESTRICT,
     sku           text         NOT NULL,
     qty           integer      NOT NULL CHECK (qty > 0),
     amount_cents  bigint       NOT NULL CHECK (amount_cents >= 0),
@@ -137,17 +137,29 @@ CREATE INDEX IF NOT EXISTS orders_status_created_idx   ON public.orders (status,
 -- full scan — a nice detail if an architect asks how it triaged so fast.
 CREATE INDEX IF NOT EXISTS orders_payload_gin_idx      ON public.orders USING gin (payload jsonb_path_ops);
 
-CREATE INDEX IF NOT EXISTS customers_tier_idx          ON public.customers (tier);
-CREATE INDEX IF NOT EXISTS customers_created_at_idx    ON public.customers (created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS customers_email_uidx ON public.customers (lower(email));
+CREATE INDEX IF NOT EXISTS customers_tier_idx          ON private.customer_pii (tier);
+CREATE INDEX IF NOT EXISTS customers_created_at_idx    ON private.customer_pii (created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS customers_email_uidx ON private.customer_pii (lower(email));
 
 CREATE INDEX IF NOT EXISTS payments_order_id_idx       ON public.payments (order_id);
 CREATE UNIQUE INDEX IF NOT EXISTS payments_ref_uidx    ON public.payments (processor_ref);
 
 -- -----------------------------------------------------------------------------
--- Convenience view used by the agent's triage playbook (AGENT.md step 3).
--- Read-only, no PII, safe for the model to receive in full.
+-- Safe views exposed to the standing read identity.
 -- -----------------------------------------------------------------------------
+CREATE OR REPLACE VIEW public.customers
+WITH (security_barrier = true) AS
+SELECT
+    id,
+    name,
+    '[REDACTED]'::text AS email,
+    '[REDACTED]'::text AS phone,
+    created_at,
+    tier
+FROM private.customer_pii;
+
+COMMENT ON VIEW public.customers IS 'Agent-safe customer projection. Raw email and phone never cross the database privilege boundary.';
+
 CREATE OR REPLACE VIEW public.order_health AS
 SELECT
     status,

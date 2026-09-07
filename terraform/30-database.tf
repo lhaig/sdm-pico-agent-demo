@@ -150,8 +150,10 @@ resource "aws_db_instance" "shopfront" {
 # =============================================================================
 
 resource "aws_secretsmanager_secret" "db" {
+  # Keep the established path to avoid replacing the secret and both app hosts.
+  # Its contents are now the non-owner application identity, not the RDS master.
   name        = "${local.name}/shopfront/master"
-  description = "shopfront master credential - consumed by orders-api. NOT by the agent."
+  description = "Least-privilege shopfront application credential. Not available to the agent."
 
   # Zero recovery window so a rebuild ten minutes after a destroy does not hit
   # "a secret with this name is scheduled for deletion".
@@ -170,7 +172,7 @@ resource "aws_secretsmanager_secret_version" "db" {
     host     = aws_db_instance.shopfront.address
     port     = aws_db_instance.shopfront.port
     dbname   = var.db_name
-    username = var.db_username
-    password = var.db_password
+    username = "orders_api"
+    password = var.db_app_password
   })
 }

@@ -353,15 +353,13 @@ def get_customer(customer_id: int):
     """
     Customer lookup.
 
-    Note for the demo narration: when the AGENT reads customers through
-    StrongDM, `email` and `phone` come back masked by policy 20 even though
-    this code selects them plainly. The application is unchanged; the masking
-    happens in flight. Nothing here had to be modified to protect the PII.
+    The application identity can read the private customer table. The agent's
+    separate database identity can only read the masked public projection.
     """
     with conn_cursor() as cur:
         cur.execute(
             "SELECT id, name, email, phone, tier, created_at "
-            "FROM public.customers WHERE id = %s",
+            "FROM private.customer_pii WHERE id = %s",
             (customer_id,),
         )
         row = cur.fetchone()

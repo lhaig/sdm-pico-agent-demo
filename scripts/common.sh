@@ -91,7 +91,7 @@ load_env() {
     # own human account, which is in the sre-oncall role and therefore exempt
     # from policy 10:
     #
-    #     sdm connect pg-prod-shopfront-read 5433
+    #     sdm connect pg-prod-shopfront-admin 5433
     #
     # Everything that mutates the environment goes through this: reset.sh
     # (TRUNCATE + INSERT), break-it.sh (CREATE TABLE + UPDATE) and app/seed.py
@@ -105,6 +105,7 @@ load_env() {
 
     : "${PG_READ_RESOURCE:=pg-prod-shopfront-read}"
     : "${PG_REMEDIATION_RESOURCE:=pg-prod-shopfront-remediation}"
+    : "${PG_ADMIN_RESOURCE:=pg-prod-shopfront-admin}"
     : "${PG_REMEDIATION_PORT:=5434}"
     # `sdm connect grafana-mcp` -> 10001, `sdm connect github-mcp` -> 10002.
     # These used to be PAGERDUTY_MCP_PORT/GITHUB_MCP_PORT; the Grafana MCP
@@ -228,7 +229,7 @@ need_admin_db() {
      prod-tagged resource. Open a second connection under your own human
      account, which is in sre-oncall and exempt:
 
-         sdm connect ${PG_READ_RESOURCE} 5433
+         sdm connect ${PG_ADMIN_RESOURCE} 5433
 
      then set SHOPFRONT_ADMIN_URL in scripts/.env to match."
 }
