@@ -54,7 +54,7 @@ resource "aws_db_subnet_group" "shopfront" {
 resource "aws_db_parameter_group" "shopfront" {
   name        = "${local.name}-postgres16"
   family      = "postgres16"
-  description = "shopfront demo tuning — verbose statement logging for the audit contrast"
+  description = "shopfront demo tuning - verbose statement logging for the audit contrast"
 
   parameter {
     name  = "log_statement"
@@ -151,7 +151,7 @@ resource "aws_db_instance" "shopfront" {
 
 resource "aws_secretsmanager_secret" "db" {
   name        = "${local.name}/shopfront/master"
-  description = "shopfront master credential — consumed by orders-api. NOT by the agent."
+  description = "shopfront master credential - consumed by orders-api. NOT by the agent."
 
   # Zero recovery window so a rebuild ten minutes after a destroy does not hit
   # "a secret with this name is scheduled for deletion".

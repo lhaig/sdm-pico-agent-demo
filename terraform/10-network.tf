@@ -195,7 +195,7 @@ resource "aws_security_group" "sdm_gateway" {
 
 resource "aws_vpc_security_group_ingress_rule" "gateway_client" {
   security_group_id = aws_security_group.sdm_gateway.id
-  description       = "StrongDM clients and the relay's reverse tunnel dial in here"
+  description       = "StrongDM clients and the relay reverse tunnel dial in here"
 
   # Open to the world by necessity: the gateway is the public entry point, and
   # the client population (your laptop, the agent VM, a customer's laptop during
@@ -417,7 +417,7 @@ resource "aws_security_group" "rds" {
 
 resource "aws_vpc_security_group_ingress_rule" "rds_from_relay" {
   security_group_id = aws_security_group.rds.id
-  description       = "Postgres from the StrongDM relay — the brokered path"
+  description       = "Postgres from the StrongDM relay - the brokered path"
 
   referenced_security_group_id = aws_security_group.sdm_relay.id
   from_port                    = 5432
@@ -427,7 +427,7 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_relay" {
 
 resource "aws_vpc_security_group_ingress_rule" "rds_from_app" {
   security_group_id = aws_security_group.rds.id
-  description       = "Postgres from orders-api — the application's own path"
+  description       = "Postgres from orders-api - the application path"
 
   referenced_security_group_id = aws_security_group.app.id
   from_port                    = 5432

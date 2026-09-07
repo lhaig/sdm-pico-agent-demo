@@ -92,7 +92,8 @@ resource "sdm_resource" "pg_prod_shopfront_read" {
     username = var.db_username
     password = var.db_password
 
-    port_override = 5432
+    bind_interface = "127.0.0.1"
+    port_override  = 5432
 
     tags = merge(local.prod_tags, { access = "read" })
   }
@@ -111,7 +112,8 @@ resource "sdm_resource" "pg_prod_shopfront_remediation" {
     username = var.db_username
     password = var.db_password
 
-    port_override = 5434
+    bind_interface = "127.0.0.1"
+    port_override  = 5434
 
     tags = merge(local.prod_tags, { access = "remediation" })
   }

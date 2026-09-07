@@ -19,8 +19,9 @@ resource "sdm_resource" "grafana_mcp" {
     url      = local.grafana_mcp_url
     password = var.mcp_caller_bearer_token
 
-    port_override = 10001
-    tags          = local.mcp_tags
+    bind_interface = "127.0.0.1"
+    port_override  = 10001
+    tags           = local.mcp_tags
   }
 
   depends_on = [aws_instance.mcp_host]
@@ -32,7 +33,8 @@ resource "sdm_resource" "github_mcp" {
     url      = var.github_mcp_url
     password = var.github_mcp_token
 
-    port_override = 10002
-    tags          = local.mcp_tags
+    bind_interface = "127.0.0.1"
+    port_override  = 10002
+    tags           = local.mcp_tags
   }
 }
