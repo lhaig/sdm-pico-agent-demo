@@ -329,7 +329,9 @@ Wants=network-online.target
 [Service]
 Type=exec
 User=${AGENT_USER}
+Environment=HOME=${AGENT_HOME}
 EnvironmentFile=/etc/nightshift-sdm.env
+WorkingDirectory=${AGENT_HOME}
 ExecStart=/usr/local/bin/nightshift-sdm-up
 TimeoutStartSec=120
 Restart=always
