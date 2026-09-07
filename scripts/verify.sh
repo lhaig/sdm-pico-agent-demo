@@ -37,7 +37,8 @@ if printf '%s' "$STATUS" | grep -q "$PG_REMEDIATION_RESOURCE"; then
 else
     pass "remediation resource is absent before approval"
 fi
-if agent_exec "sdm access requests >/dev/null"; then
+ACCESS_REQUESTS="$(agent_exec "sdm access requests" 2>&1 || true)"
+if printf '%s' "$ACCESS_REQUESTS" | grep -q 'AccountID.*ResourceID.*Status'; then
     pass "agent can inspect its access-request state"
 else
     fail "access-request listing is blocked; verify baseline control-plane permits"
@@ -116,10 +117,9 @@ for port in "$GRAFANA_MCP_PORT" "$GITHUB_MCP_PORT" 18791; do
     if port_open 127.0.0.1 "$port"; then pass "operator-forwarded port $port is open"; else fail "port $port closed; run ./scripts/live-demo.sh operator-tunnel"; fi
 done
 
-for pair in "$GRAFANA_MCP_PORT:grafana" "$GITHUB_MCP_PORT:github"; do
-    IFS=: read -r port name <<<"$pair"
-    if ! TOOLS="$(mcp_rpc "$port" tools/list 2>/dev/null)"; then
-        fail "$name tools/list failed through StrongDM"
+for name in grafana github; do
+    if ! TOOLS="$(agent_exec "picoclaw mcp show '$name'" 2>&1)"; then
+        fail "PicoClaw could not enumerate $name tools through StrongDM"
         continue
     fi
     if [[ "$name" == "grafana" ]]; then
