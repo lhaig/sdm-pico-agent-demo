@@ -269,33 +269,35 @@ install -m 0644 -o "$AGENT_USER" -g "$AGENT_USER" \
 ok "config.json in place"
 
 # -----------------------------------------------------------------------------
-# 6. StrongDM login + connections (systemd oneshot, so it survives reboot)
+# 6. StrongDM login, listener, and connections
 # -----------------------------------------------------------------------------
 say "Writing systemd units"
 
 # --- nightshift-sdm.service ---------------------------------------------------
 # Logs the service account in and opens the loopback listeners. Everything else
 # depends on this: without it there is no 127.0.0.1:5432 and no MCP ports.
-cat > /usr/local/bin/nightshift-sdm-up <<EOF
+cat > /usr/local/bin/nightshift-sdm-login <<'EOF'
 #!/usr/bin/env bash
-# Log in as the nightshift-agent service account and open the proxied ports.
-# Written by agent/bootstrap.sh.
 set -euo pipefail
-
-: "\${SDM_ADMIN_TOKEN:?SDM_ADMIN_TOKEN (service account token) is not set — put it in /etc/nightshift-sdm.env}"
-
-# Non-interactive login for a service account. If your CLI build wants a
-# different flag, this is the one line to change.
+: "${SDM_ADMIN_TOKEN:?SDM_ADMIN_TOKEN is not set in /etc/nightshift-sdm.env}"
 sdm login || { echo "sdm login failed"; exit 1; }
+EOF
+chmod 0755 /usr/local/bin/nightshift-sdm-login
 
+cat > /usr/local/bin/nightshift-sdm-connect <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+for _ in {1..30}; do
+    sdm ready >/dev/null 2>&1 && break
+    sleep 1
+done
+sdm ready >/dev/null 2>&1 || { echo "StrongDM listener did not become ready"; exit 1; }
 sdm connect ${PG_READ_RESOURCE} ${PG_READ_PORT}
 sdm connect ${GRAFANA_MCP_RESOURCE} ${GRAFANA_MCP_PORT}
 sdm connect ${GITHUB_MCP_RESOURCE} ${GITHUB_MCP_PORT}
-
 sdm status
-exec sdm listen
 EOF
-chmod 0755 /usr/local/bin/nightshift-sdm-up
+chmod 0755 /usr/local/bin/nightshift-sdm-connect
 
 if [[ ! -f /etc/nightshift-sdm.env ]]; then
     cat > /etc/nightshift-sdm.env <<EOF
@@ -332,7 +334,9 @@ User=${AGENT_USER}
 Environment=HOME=${AGENT_HOME}
 EnvironmentFile=/etc/nightshift-sdm.env
 WorkingDirectory=${AGENT_HOME}
-ExecStart=/usr/local/bin/nightshift-sdm-up
+ExecStartPre=/usr/local/bin/nightshift-sdm-login
+ExecStart=/usr/local/bin/sdm listen
+ExecStartPost=/usr/local/bin/nightshift-sdm-connect
 TimeoutStartSec=120
 Restart=always
 RestartSec=5s
