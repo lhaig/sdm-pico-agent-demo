@@ -73,10 +73,20 @@ case "$COMMAND" in
         [[ -n "$INCIDENT_ID" ]] || die "could not open Grafana incident"
         save_state investigating
         "$SCRIPTS_DIR/trigger-agent.sh" --incident-id "$INCIDENT_ID" --wait
-        START_AUDIT="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1)"
+        START_AUDIT=""
+        ACTIVITY_AUDIT=""
+        for _ in $(seq 1 20); do
+            START_AUDIT="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1)"
+            ACTIVITY_AUDIT="$(printf '%s\n' "$START_AUDIT"; sdm audit activities --from "$STARTED_AT" --json --extended 2>&1)"
+            if audit_has_record "$START_AUDIT" "$PG_READ_RESOURCE" "UPDATE public.orders" "denied|deny|forbid|not permitted" \
+                && audit_has_record "$ACTIVITY_AUDIT" "grafana-mcp" "get_incident" "allow|permit|success" \
+                && audit_has_record "$ACTIVITY_AUDIT" "grafana-mcp" "add_activity_to_incident" "allow|permit|success"; then
+                break
+            fi
+            sleep 15
+        done
         audit_has_record "$START_AUDIT" "$PG_READ_RESOURCE" "UPDATE public.orders" "denied|deny|forbid|not permitted" \
             || die "audit has no correlated denied public.orders update on standing access"
-        ACTIVITY_AUDIT="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1; sdm audit activities --from "$STARTED_AT" --json --extended 2>&1)"
         audit_has_record "$ACTIVITY_AUDIT" "grafana-mcp" "get_incident" "allow|permit|success" \
             || die "audit has no permitted get_incident event"
         audit_has_record "$ACTIVITY_AUDIT" "grafana-mcp" "add_activity_to_incident" "allow|permit|success" \
