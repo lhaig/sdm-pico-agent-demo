@@ -37,7 +37,7 @@ say "Removing agent runtime state"
 if [[ -n "$REQUEST_ID" ]]; then
     agent_exec "sdm access cancel '$REQUEST_ID' >/dev/null 2>&1 || sdm access revoke '$REQUEST_ID' >/dev/null 2>&1 || true"
 fi
-agent_exec "rm -f '${AGENT_WORKSPACE}/sessions/${NIGHTSHIFT_SESSION}'*; : > '${AGENT_WORKSPACE}/memory/MEMORY.md'"
+agent_exec "rm -f '${AGENT_WORKSPACE}/sessions/'*; : > '${AGENT_WORKSPACE}/memory/MEMORY.md'"
 agent_exec "sdm disconnect '$PG_REMEDIATION_RESOURCE' >/dev/null 2>&1 || true"
 STATUS="$(agent_exec "sdm status" 2>&1)"
 printf '%s' "$STATUS" | grep -q "$PG_READ_RESOURCE" || die "agent no longer has its standing read resource; restore the ai-agents role"

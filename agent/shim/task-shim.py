@@ -186,11 +186,13 @@ def build_prompt(payload: dict) -> str:
         "Triage this now, following the procedure in AGENT.md section 3.",
         "",
         "Reminders:",
+        f"- First call mcp_grafana_get_incident for incident {incident_id}.",
         f"- Quote the incident ID ({incident_id}) in every Slack post and every "
         "access request.",
         "- Add your triage summary to the incident timeline before remediation.",
-        "- Before requesting access, run the canonical UPDATE once on the standing "
-        "read endpoint so StrongDM records the expected denial.",
+        "- Before requesting access, run the canonical UPDATE from AGENT.md exactly "
+        "once as ./bin/db-query.sh \"UPDATE ...\" without --remediation. The default "
+        "endpoint is standing read access and StrongDM must record its denial.",
         "- Return the same summary in your completed job output.",
         "- If the platform refuses an action, read the reason, do not retry, and "
         "escalate via the documented path (AGENT.md section 5).",
