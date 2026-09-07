@@ -332,8 +332,9 @@ Wants=network-online.target
 Type=exec
 User=${AGENT_USER}
 Environment=HOME=${AGENT_HOME}
+Environment=SDM_HOME=${AGENT_HOME}/.sdm
 EnvironmentFile=/etc/nightshift-sdm.env
-WorkingDirectory=${AGENT_HOME}
+WorkingDirectory=${AGENT_HOME}/.sdm
 ExecStartPre=/usr/local/bin/nightshift-sdm-login
 ExecStart=/usr/local/bin/sdm listen
 ExecStartPost=/usr/local/bin/nightshift-sdm-connect
