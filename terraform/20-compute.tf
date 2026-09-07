@@ -635,6 +635,7 @@ resource "aws_instance" "sdm_gateway" {
     aws_region     = var.aws_region
     listen_port    = var.gateway_listen_port
     sdm_api_host   = var.sdm_api_host
+    sdm_app_domain = var.sdm_app_domain
   })
 
   # Re-run user-data if the bootstrap script changes, rather than silently
@@ -681,6 +682,7 @@ resource "aws_instance" "sdm_relay" {
     token_ssm_path = aws_ssm_parameter.sdm_relay_token.name
     aws_region     = var.aws_region
     sdm_api_host   = var.sdm_api_host
+    sdm_app_domain = var.sdm_app_domain
   })
 
   user_data_replace_on_change = true

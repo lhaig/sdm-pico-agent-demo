@@ -76,9 +76,9 @@ rm -rf "$TMP"
 
 echo "--- registering node (gateway listener on :${listen_port})"
 sdm install \
-  --relay \
+  --gateway \
   --token="$SDM_TOKEN" \
-  --daemon
+  --app-domain='${sdm_app_domain}'
 
 # The token has done its job. Take it out of the shell's environment; the
 # systemd unit written by the installer holds its own copy.

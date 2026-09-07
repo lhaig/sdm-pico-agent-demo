@@ -41,6 +41,12 @@ variable "sdm_api_host" {
   default     = "api.eu.strongdm.com:443"
 }
 
+variable "sdm_app_domain" {
+  description = "StrongDM application domain passed to node installation."
+  type        = string
+  default     = "app.eu.strongdm.com"
+}
+
 
 # -----------------------------------------------------------------------------
 #  AWS placement

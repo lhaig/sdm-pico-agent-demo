@@ -166,6 +166,7 @@ Edit `terraform/terraform.tfvars` and set at least:
 |---|---|
 | `owner` | Your email |
 | `sdm_api_host` | `api.eu.strongdm.com:443` for the EU control plane |
+| `sdm_app_domain` | `app.eu.strongdm.com` for the EU control plane |
 | `aws_region` | Your AWS region |
 | `availability_zones` | Two AZs in that region |
 | `agent_vm_private_ip` | Free address in `private_subnet_cidrs[0]` |

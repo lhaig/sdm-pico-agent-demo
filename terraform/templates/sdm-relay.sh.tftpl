@@ -79,7 +79,7 @@ echo "--- registering relay (outbound only — no listener)"
 sdm install \
   --relay \
   --token="$SDM_TOKEN" \
-  --daemon
+  --app-domain='${sdm_app_domain}'
 
 unset SDM_TOKEN
 
