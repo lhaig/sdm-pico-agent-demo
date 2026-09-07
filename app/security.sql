@@ -46,7 +46,7 @@ REVOKE ALL ON ALL TABLES IN SCHEMA public, private, pristine FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO shopfront_read, shopfront_remediation, orders_api;
 GRANT USAGE ON SCHEMA private TO orders_api;
 
-GRANT SELECT ON public.customers, public.orders, public.order_health TO shopfront_read;
+GRANT SELECT ON public.customers, public.orders, public.order_health, public.poison_backup TO shopfront_read;
 
 GRANT SELECT (id, status, payload) ON public.orders TO shopfront_remediation;
 GRANT UPDATE (status, payload, created_at) ON public.orders TO shopfront_remediation;
