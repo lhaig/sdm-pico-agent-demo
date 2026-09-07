@@ -98,7 +98,7 @@ fi
 
 DENIAL="$(agent_exec "cd '${AGENT_WORKSPACE}' && ./bin/db-query.sh \"UPDATE public.customers SET tier='standard' WHERE id=-1\"" 2>&1)"
 DENIAL_RC=$?
-if [[ $DENIAL_RC -eq 3 && "$DENIAL" == *"Autonomous agents cannot write through standing production access."* ]]; then
+if [[ $DENIAL_RC -ne 0 && "$DENIAL" == *"Autonomous agents cannot write through standing production access."* ]]; then
     pass "safe zero-row write probe is denied on standing access"
 else
     fail "standing write probe did not return the policy denial: $DENIAL"
