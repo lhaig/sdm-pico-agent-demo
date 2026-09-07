@@ -5,4 +5,5 @@
 workspace/sessions/
 workspace/memory/MEMORY.md
 workspace/cron/
+workspace/state/
 __pycache__/

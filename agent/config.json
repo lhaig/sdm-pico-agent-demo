@@ -125,7 +125,9 @@
     ],
     "allow_write_paths": [
       "/opt/nightshift/workspace/memory",
-      "/opt/nightshift/workspace/sessions"
+      "/opt/nightshift/workspace/sessions",
+      "/opt/nightshift/workspace/state",
+      "/opt/nightshift/workspace/cron"
     ]
   },
 

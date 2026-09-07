@@ -7,3 +7,4 @@
 .env.*
 !.env.example
 slides/node_modules/
+secrets/

@@ -59,7 +59,7 @@ PG_READ_RESOURCE="${PG_READ_RESOURCE:-pg-prod-shopfront-read}"
 PG_REMEDIATION_RESOURCE="${PG_REMEDIATION_RESOURCE:-pg-prod-shopfront-remediation}"
 PG_READ_PORT="${PG_READ_PORT:-5432}"
 PG_REMEDIATION_PORT="${PG_REMEDIATION_PORT:-5434}"
-SDM_API_HOST="${SDM_API_HOST:-api.eu.strongdm.com:443}"
+SDM_APP_DOMAIN="${SDM_APP_DOMAIN:-app.eu.strongdm.com}"
 GRAFANA_MCP_RESOURCE="${GRAFANA_MCP_RESOURCE:-grafana-mcp}"
 GITHUB_MCP_RESOURCE="${GITHUB_MCP_RESOURCE:-github-mcp}"
 GRAFANA_MCP_PORT="${GRAFANA_MCP_PORT:-10001}"
@@ -158,6 +158,8 @@ install -d -m 0755 -o root -g root "$WORKSPACE"
 install -d -m 0755 -o root -g root "${WORKSPACE}/bin"
 install -d -m 0755 -o "$AGENT_USER" -g "$AGENT_USER" "${WORKSPACE}/memory"
 install -d -m 0755 -o "$AGENT_USER" -g "$AGENT_USER" "${WORKSPACE}/sessions"
+install -d -m 0755 -o "$AGENT_USER" -g "$AGENT_USER" "${WORKSPACE}/state"
+install -d -m 0755 -o "$AGENT_USER" -g "$AGENT_USER" "${WORKSPACE}/cron"
 
 install -m 0644 -o "$AGENT_USER" -g "$AGENT_USER" \
     "${REPO_DIR}/agent/config.json" "${PICOCLAW_HOME}/config.json"
@@ -301,7 +303,7 @@ if [[ ! -f /etc/nightshift-sdm.env ]]; then
 # only what Cedar policy allows, every use is authorized per action, and it can
 # be revoked centrally in one click (Moment 6).
 SDM_ADMIN_TOKEN=${SDM_ADMIN_TOKEN:-REPLACE_WITH_SERVICE_ACCOUNT_TOKEN}
-SDM_API_HOST=${SDM_API_HOST}
+SDM_APP_DOMAIN=${SDM_APP_DOMAIN}
 PG_REMEDIATION_RESOURCE=${PG_REMEDIATION_RESOURCE}
 PG_REMEDIATION_PORT=${PG_REMEDIATION_PORT}
 EOF
@@ -310,10 +312,11 @@ EOF
 elif [[ -n "${SDM_ADMIN_TOKEN:-}" ]]; then
     sed -i "s|^SDM_ADMIN_TOKEN=.*|SDM_ADMIN_TOKEN=${SDM_ADMIN_TOKEN}|" /etc/nightshift-sdm.env
 fi
-if grep -q '^SDM_API_HOST=' /etc/nightshift-sdm.env; then
-    sed -i "s|^SDM_API_HOST=.*|SDM_API_HOST=${SDM_API_HOST}|" /etc/nightshift-sdm.env
+sed -i '/^SDM_API_HOST=/d' /etc/nightshift-sdm.env
+if grep -q '^SDM_APP_DOMAIN=' /etc/nightshift-sdm.env; then
+    sed -i "s|^SDM_APP_DOMAIN=.*|SDM_APP_DOMAIN=${SDM_APP_DOMAIN}|" /etc/nightshift-sdm.env
 else
-    printf 'SDM_API_HOST=%s\n' "$SDM_API_HOST" >>/etc/nightshift-sdm.env
+    printf 'SDM_APP_DOMAIN=%s\n' "$SDM_APP_DOMAIN" >>/etc/nightshift-sdm.env
 fi
 
 cat > /etc/systemd/system/nightshift-sdm.service <<EOF
@@ -360,7 +363,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=${PICOCLAW_HOME} ${WORKSPACE}/memory ${WORKSPACE}/sessions ${LOG_DIR}
+ReadWritePaths=${PICOCLAW_HOME} ${WORKSPACE}/memory ${WORKSPACE}/sessions ${WORKSPACE}/state ${WORKSPACE}/cron ${LOG_DIR}
 
 StandardOutput=journal
 StandardError=journal
@@ -392,7 +395,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=false
-ReadWritePaths=${PICOCLAW_HOME} ${WORKSPACE}/memory ${WORKSPACE}/sessions ${LOG_DIR}
+ReadWritePaths=${PICOCLAW_HOME} ${WORKSPACE}/memory ${WORKSPACE}/sessions ${WORKSPACE}/state ${WORKSPACE}/cron ${LOG_DIR}
 
 StandardOutput=journal
 StandardError=journal

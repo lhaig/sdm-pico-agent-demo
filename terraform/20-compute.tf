@@ -749,7 +749,7 @@ resource "aws_instance" "agent_vm" {
     github_mcp_name              = local.github_mcp_name
     github_repo                  = var.github_repo
     agent_ssh_public_key         = sdm_resource.agent_vm.ssh[0].public_key
-    sdm_api_host                 = var.sdm_api_host
+    sdm_app_domain               = var.sdm_app_domain
     nightshift_repo_url          = var.nightshift_repo_url
     nightshift_repo_ref          = var.nightshift_repo_ref
   })
