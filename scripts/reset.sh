@@ -45,7 +45,8 @@ if printf '%s' "$STATUS" | grep -q "$PG_REMEDIATION_RESOURCE"; then
     die "remediation resource is still connected; revoke the access request in StrongDM"
 fi
 REQUESTS="$(agent_exec "sdm access requests" 2>&1 || true)"
-if printf '%s' "$REQUESTS" | grep "$PG_REMEDIATION_RESOURCE" | grep -Eqi 'pending|approved|granted|active'; then
+if printf '%s\n' "$REQUESTS" | awk \
+    '$4 ~ /^(Pending|Approved|Granted|Active)$/ { found = 1 } END { exit !found }'; then
     printf '%s\n' "$REQUESTS" >&2
     die "an active remediation request remains; cancel or revoke it before presenting"
 fi
