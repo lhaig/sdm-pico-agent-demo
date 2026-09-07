@@ -32,6 +32,7 @@ locals {
   agent_vm_resource_name       = "agent-vm"
   app_01_resource_name         = "app-01"
   app_02_resource_name         = "app-02"
+  private_egress_filter        = "tag:tier=private"
 
   # Applied to every resource the agent can reach. Kept in one place so the tag
   # contract that policy 10 depends on cannot drift between resources.
@@ -49,9 +50,10 @@ resource "sdm_resource" "agent_vm" {
   ssh {
     name = local.agent_vm_resource_name
 
-    hostname = var.agent_vm_private_ip
-    port     = 22
-    username = "ubuntu"
+    hostname      = var.agent_vm_private_ip
+    port          = 22
+    username      = "ubuntu"
+    egress_filter = local.private_egress_filter
 
     key_type        = "ed25519"
     port_forwarding = true
@@ -89,8 +91,9 @@ resource "sdm_resource" "pg_prod_shopfront_read" {
     port     = aws_db_instance.shopfront.port
     database = var.db_name
 
-    username = var.db_username
-    password = var.db_password
+    username      = var.db_username
+    password      = var.db_password
+    egress_filter = local.private_egress_filter
 
     bind_interface = "127.0.0.1"
     port_override  = 5432
@@ -109,8 +112,9 @@ resource "sdm_resource" "pg_prod_shopfront_remediation" {
     port     = aws_db_instance.shopfront.port
     database = var.db_name
 
-    username = var.db_username
-    password = var.db_password
+    username      = var.db_username
+    password      = var.db_password
+    egress_filter = local.private_egress_filter
 
     bind_interface = "127.0.0.1"
     port_override  = 5434
@@ -149,9 +153,10 @@ resource "sdm_resource" "app_01" {
   ssh {
     name = local.app_01_resource_name
 
-    hostname = var.app_01_private_ip
-    port     = 22
-    username = "ubuntu"
+    hostname      = var.app_01_private_ip
+    port          = 22
+    username      = "ubuntu"
+    egress_filter = local.private_egress_filter
 
     key_type = "ed25519"
 
@@ -166,9 +171,10 @@ resource "sdm_resource" "app_02" {
   ssh {
     name = local.app_02_resource_name
 
-    hostname = var.app_02_private_ip
-    port     = 22
-    username = "ubuntu"
+    hostname      = var.app_02_private_ip
+    port          = 22
+    username      = "ubuntu"
+    egress_filter = local.private_egress_filter
 
     key_type = "ed25519"
 

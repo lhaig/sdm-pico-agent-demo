@@ -293,6 +293,7 @@ sdm connect ${GRAFANA_MCP_RESOURCE} ${GRAFANA_MCP_PORT}
 sdm connect ${GITHUB_MCP_RESOURCE} ${GITHUB_MCP_PORT}
 
 sdm status
+exec sdm listen
 EOF
 chmod 0755 /usr/local/bin/nightshift-sdm-up
 
@@ -326,14 +327,13 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
+Type=exec
 User=${AGENT_USER}
 EnvironmentFile=/etc/nightshift-sdm.env
 ExecStart=/usr/local/bin/nightshift-sdm-up
-ExecStop=/usr/local/bin/sdm logout
 TimeoutStartSec=120
-Restart=no
+Restart=always
+RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target

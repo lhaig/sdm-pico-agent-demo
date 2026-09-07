@@ -7,4 +7,9 @@
 .env.*
 !.env.example
 slides/node_modules/
-secrets/
+# Blanket-ignored on purpose: anything resolved, dumped or exported into this
+# directory stays untracked. The op:// reference templates are the exception —
+# they contain pointers, not values, and are the source of truth for
+# scripts/secrets.sh.
+secrets/*
+!secrets/*.tpl

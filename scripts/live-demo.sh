@@ -29,25 +29,26 @@ case "$COMMAND" in
         [[ -n "$AGENT_SSH_RESOURCE" ]] || die "set AGENT_SSH_RESOURCE in scripts/.env"
         sdm ssh config --write "$SDM_SSH_CONFIG" >/dev/null
         chmod 0600 "$SDM_SSH_CONFIG"
-        if [[ -S "$SSH_CONTROL" ]] && ssh -F "$SDM_SSH_CONFIG" -S "$SSH_CONTROL" -O check "$AGENT_SSH_RESOURCE" >/dev/null 2>&1; then
+        if [[ -S "$SSH_CONTROL" ]] && ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O check "$AGENT_SSH_RESOURCE" >/dev/null 2>&1; then
             ok "operator control tunnel is already running"
             info "the agent's StrongDM resource connections run independently on the agent VM"
             exit 0
         fi
         rm -f "$SSH_CONTROL"
-        if port_open 127.0.0.1 10001 || port_open 127.0.0.1 10002 || port_open 127.0.0.1 18791; then
+        if port_open 127.0.0.1 "$GRAFANA_MCP_PORT" || port_open 127.0.0.1 "$GITHUB_MCP_PORT" || port_open 127.0.0.1 18791; then
             die "a required local port is occupied by an unmanaged process"
         fi
         if ! ssh -F "$SDM_SSH_CONFIG" -M -S "$SSH_CONTROL" -fN -o ExitOnForwardFailure=yes \
-            -L 10001:127.0.0.1:10001 \
-            -L 10002:127.0.0.1:10002 \
+            -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" \
+            -L "${GRAFANA_MCP_PORT}:127.0.0.1:10001" \
+            -L "${GITHUB_MCP_PORT}:127.0.0.1:10002" \
             -L 18791:127.0.0.1:18791 \
             "$AGENT_SSH_RESOURCE"; then
             die "StrongDM SSH forwarding failed. Enable SSH port forwarding in the organisation settings and on the agent-vm resource."
         fi
         ok "operator control tunnel established"
         info "transport: StrongDM-managed SSH resource ${AGENT_SSH_RESOURCE}"
-        info "forwarded for control/preflight: task shim 18791, Grafana MCP 10001, GitHub MCP 10002"
+        info "forwarded for control/preflight: task shim 18791, Grafana MCP ${GRAFANA_MCP_PORT}, GitHub MCP ${GITHUB_MCP_PORT}"
         info "agent database traffic is not forwarded; the agent opens its own StrongDM listeners"
         ;;
     prepare)
@@ -144,7 +145,7 @@ case "$COMMAND" in
     reset)
         "$SCRIPTS_DIR/reset.sh"
         if [[ -S "$SSH_CONTROL" ]]; then
-            ssh -F "$SDM_SSH_CONFIG" -S "$SSH_CONTROL" -O exit "$AGENT_SSH_RESOURCE" >/dev/null
+            ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O exit "$AGENT_SSH_RESOURCE" >/dev/null
         fi
         ;;
     *)

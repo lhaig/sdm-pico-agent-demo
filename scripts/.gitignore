@@ -4,3 +4,4 @@
 .live-demo-state
 .live-demo-ssh
 .sdm-ssh-config
+.sdm-known-hosts

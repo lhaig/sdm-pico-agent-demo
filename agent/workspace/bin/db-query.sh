@@ -68,7 +68,7 @@ case "$FORMAT" in
         PSQL_ARGS+=(--tuples-only --no-align)
         ;;
     csv) PSQL_ARGS+=(--csv) ;;
-    table) PSQL_ARGS+=(--expanded=auto --pset=pager=off) ;;
+    table) PSQL_ARGS+=(--pset=expanded=auto --pset=pager=off) ;;
 esac
 
 set +e

@@ -55,7 +55,7 @@ DB_SECRET_JSON="$(aws secretsmanager get-secret-value \
   --secret-id '${db_secret_arn}' \
   --query SecretString --output text)"
 DB_USER="$(printf '%s' "$DB_SECRET_JSON" | jq -r '.username')"
-DB_PASS="$(printf '%s' "$DB_SECRET_JSON" | jq -r '.password' | jq -sRr @uri)"
+DB_PASS="$(printf '%s' "$DB_SECRET_JSON" | jq -rj '.password' | jq -sRr @uri)"
 
 umask 077
 cat >/etc/orders-api.env <<EOF

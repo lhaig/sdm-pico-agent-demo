@@ -45,10 +45,30 @@ die()  { printf '\n%sFATAL: %s%s\n' "$C_RED" "$*" "$C_RESET" >&2; exit 1; }
 load_env() {
     local env_file="${NIGHTSHIFT_ENV_FILE:-${SCRIPTS_DIR}/.env}"
     if [[ -f "$env_file" ]]; then
+        # THE ENVIRONMENT WINS OVER THE FILE.
+        #
+        # secrets.sh runs these scripts under `op run`, which injects the real
+        # credentials as environment variables. Sourcing .env afterwards would
+        # overwrite them with whatever placeholder the file still carries —
+        # GRAFANA_SA_TOKEN=glsa_REPLACE_ME being the obvious way to lose an
+        # afternoon. So snapshot anything already set, source, then put the
+        # snapshot back.
+        local -a preserved
+        preserved=()
+        local key
+        while IFS= read -r key; do
+            [[ -n "${!key:-}" ]] && preserved+=("${key}=${!key}")
+        done < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$env_file")
+
         set -a
         # shellcheck disable=SC1090
         source "$env_file"
         set +a
+
+        local kv
+        for kv in ${preserved[@]+"${preserved[@]}"}; do
+            export "${kv?}"
+        done
     fi
 
     # Defaults for everything the scripts touch, so a missing .env produces a
@@ -89,8 +109,8 @@ load_env() {
     # `sdm connect grafana-mcp` -> 10001, `sdm connect github-mcp` -> 10002.
     # These used to be PAGERDUTY_MCP_PORT/GITHUB_MCP_PORT; the Grafana MCP
     # server replaced PagerDuty's (§4.4) and it is self-hosted on mcp-host.
-    : "${GRAFANA_MCP_PORT:=10001}"
-    : "${GITHUB_MCP_PORT:=10002}"
+    : "${GRAFANA_MCP_PORT:=13001}"
+    : "${GITHUB_MCP_PORT:=13002}"
 
     # -------------------------------------------------------------------------
     # GRAFANA CLOUD — the incident chain AND the object the agent reads (§6).
@@ -139,6 +159,7 @@ load_env() {
 
     : "${AGENT_SSH_RESOURCE:=agent-vm}"
     : "${SDM_SSH_CONFIG:=${SCRIPTS_DIR}/.sdm-ssh-config}"
+    : "${SDM_KNOWN_HOSTS:=${SCRIPTS_DIR}/.sdm-known-hosts}"
     : "${AGENT_HOME:=/home/ubuntu}"
     : "${PICOCLAW_HOME:=${AGENT_HOME}/.picoclaw}"
     : "${AGENT_WORKSPACE:=/opt/nightshift/workspace}"
@@ -159,6 +180,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 agent_exec() {
     [[ -f "$SDM_SSH_CONFIG" ]] || die "StrongDM SSH config missing; run ./scripts/live-demo.sh operator-tunnel"
     ssh -F "$SDM_SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=8 \
+        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" \
         "$AGENT_SSH_RESOURCE" "$@"
 }
 

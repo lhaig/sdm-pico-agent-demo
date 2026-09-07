@@ -15,9 +15,10 @@ locals {
 
 resource "sdm_resource" "grafana_mcp" {
   mcp_gateway_pat {
-    name     = local.grafana_mcp_name
-    url      = local.grafana_mcp_url
-    password = var.mcp_caller_bearer_token
+    name          = local.grafana_mcp_name
+    url           = local.grafana_mcp_url
+    password      = var.mcp_caller_bearer_token
+    egress_filter = local.private_egress_filter
 
     # Organisation-wide default. The agent explicitly connects this resource
     # on local port 10001; keeping the resource default separate avoids clashes
