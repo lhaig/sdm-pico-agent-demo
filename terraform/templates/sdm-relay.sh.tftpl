@@ -78,6 +78,7 @@ rm -rf "$TMP"
 echo "--- registering relay (outbound only — no listener)"
 sdm install \
   --relay \
+  --user root \
   --token="$SDM_TOKEN" \
   --app-domain='${sdm_app_domain}'
 
