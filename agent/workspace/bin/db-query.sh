@@ -74,7 +74,7 @@ esac
 set +e
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
-OUTPUT="$(psql "${PSQL_ARGS[@]}" --command "$FINAL" 2>"$STDERR_FILE")"
+OUTPUT="$(PGSSLMODE="${SDM_PG_SSLMODE:-disable}" psql "${PSQL_ARGS[@]}" --command "$FINAL" 2>"$STDERR_FILE")"
 RC=$?
 ERRTEXT="$(<"$STDERR_FILE")"
 set -e
