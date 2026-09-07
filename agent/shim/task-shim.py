@@ -189,6 +189,8 @@ def build_prompt(payload: dict) -> str:
         f"- Quote the incident ID ({incident_id}) in every Slack post and every "
         "access request.",
         "- Add your triage summary to the incident timeline before remediation.",
+        "- Before requesting access, run the canonical UPDATE once on the standing "
+        "read endpoint so StrongDM records the expected denial.",
         "- Return the same summary in your completed job output.",
         "- If the platform refuses an action, read the reason, do not retry, and "
         "escalate via the documented path (AGENT.md section 5).",
