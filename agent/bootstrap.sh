@@ -287,11 +287,7 @@ chmod 0755 /usr/local/bin/nightshift-sdm-login
 cat > /usr/local/bin/nightshift-sdm-connect <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-for _ in {1..30}; do
-    sdm ready >/dev/null 2>&1 && break
-    sleep 1
-done
-sdm ready >/dev/null 2>&1 || { echo "StrongDM listener did not become ready"; exit 1; }
+sleep 2
 sdm connect ${PG_READ_RESOURCE} ${PG_READ_PORT}
 sdm connect ${GRAFANA_MCP_RESOURCE} ${GRAFANA_MCP_PORT}
 sdm connect ${GITHUB_MCP_RESOURCE} ${GITHUB_MCP_PORT}
