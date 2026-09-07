@@ -50,6 +50,8 @@ allowlist demonstration.
 ## 2. Prepare StrongDM
 
 1. Sign in as an organisation administrator.
+   For this demo the Admin UI is `https://app.eu.strongdm.com` and the runtime
+   API endpoint is `api.eu.strongdm.com:443`.
 2. Enable policy enforcement in the Policy Editor.
 3. Disable or remove Global Access in this dedicated demo organisation.
 4. Enable SSH port forwarding in the StrongDM organisation settings. Terraform
@@ -163,6 +165,7 @@ Edit `terraform/terraform.tfvars` and set at least:
 | Variable | Value |
 |---|---|
 | `owner` | Your email |
+| `sdm_api_host` | `api.eu.strongdm.com:443` for the EU control plane |
 | `aws_region` | Your AWS region |
 | `availability_zones` | Two AZs in that region |
 | `agent_vm_private_ip` | Free address in `private_subnet_cidrs[0]` |

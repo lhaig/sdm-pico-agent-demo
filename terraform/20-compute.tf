@@ -634,6 +634,7 @@ resource "aws_instance" "sdm_gateway" {
     token_ssm_path = aws_ssm_parameter.sdm_gateway_token.name
     aws_region     = var.aws_region
     listen_port    = var.gateway_listen_port
+    sdm_api_host   = var.sdm_api_host
   })
 
   # Re-run user-data if the bootstrap script changes, rather than silently
@@ -679,6 +680,7 @@ resource "aws_instance" "sdm_relay" {
   user_data = templatefile("${path.module}/templates/sdm-relay.sh.tftpl", {
     token_ssm_path = aws_ssm_parameter.sdm_relay_token.name
     aws_region     = var.aws_region
+    sdm_api_host   = var.sdm_api_host
   })
 
   user_data_replace_on_change = true
@@ -745,6 +747,7 @@ resource "aws_instance" "agent_vm" {
     github_mcp_name              = local.github_mcp_name
     github_repo                  = var.github_repo
     agent_ssh_public_key         = sdm_resource.agent_vm.ssh[0].public_key
+    sdm_api_host                 = var.sdm_api_host
     nightshift_repo_url          = var.nightshift_repo_url
     nightshift_repo_ref          = var.nightshift_repo_ref
   })

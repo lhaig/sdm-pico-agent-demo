@@ -26,6 +26,7 @@
 
 project = "nightshift"
 owner   = "lance.haig@delinea.com"
+sdm_api_host = "api.eu.strongdm.com:443"
 
 
 # --- AWS placement -----------------------------------------------------------

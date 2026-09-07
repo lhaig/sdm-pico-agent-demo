@@ -59,6 +59,7 @@ PG_READ_RESOURCE="${PG_READ_RESOURCE:-pg-prod-shopfront-read}"
 PG_REMEDIATION_RESOURCE="${PG_REMEDIATION_RESOURCE:-pg-prod-shopfront-remediation}"
 PG_READ_PORT="${PG_READ_PORT:-5432}"
 PG_REMEDIATION_PORT="${PG_REMEDIATION_PORT:-5434}"
+SDM_API_HOST="${SDM_API_HOST:-api.eu.strongdm.com:443}"
 GRAFANA_MCP_RESOURCE="${GRAFANA_MCP_RESOURCE:-grafana-mcp}"
 GITHUB_MCP_RESOURCE="${GITHUB_MCP_RESOURCE:-github-mcp}"
 GRAFANA_MCP_PORT="${GRAFANA_MCP_PORT:-10001}"
@@ -300,6 +301,7 @@ if [[ ! -f /etc/nightshift-sdm.env ]]; then
 # only what Cedar policy allows, every use is authorized per action, and it can
 # be revoked centrally in one click (Moment 6).
 SDM_ADMIN_TOKEN=${SDM_ADMIN_TOKEN:-REPLACE_WITH_SERVICE_ACCOUNT_TOKEN}
+SDM_API_HOST=${SDM_API_HOST}
 PG_REMEDIATION_RESOURCE=${PG_REMEDIATION_RESOURCE}
 PG_REMEDIATION_PORT=${PG_REMEDIATION_PORT}
 EOF
@@ -307,6 +309,11 @@ EOF
     chown root:root /etc/nightshift-sdm.env
 elif [[ -n "${SDM_ADMIN_TOKEN:-}" ]]; then
     sed -i "s|^SDM_ADMIN_TOKEN=.*|SDM_ADMIN_TOKEN=${SDM_ADMIN_TOKEN}|" /etc/nightshift-sdm.env
+fi
+if grep -q '^SDM_API_HOST=' /etc/nightshift-sdm.env; then
+    sed -i "s|^SDM_API_HOST=.*|SDM_API_HOST=${SDM_API_HOST}|" /etc/nightshift-sdm.env
+else
+    printf 'SDM_API_HOST=%s\n' "$SDM_API_HOST" >>/etc/nightshift-sdm.env
 fi
 
 cat > /etc/systemd/system/nightshift-sdm.service <<EOF

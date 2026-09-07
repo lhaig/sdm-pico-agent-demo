@@ -25,6 +25,7 @@ exec > >(tee -a /var/log/nightshift-bootstrap.log) 2>&1
 echo "=== nightshift sdm-gateway bootstrap $(date -Is) ==="
 
 export DEBIAN_FRONTEND=noninteractive
+export SDM_API_HOST='${sdm_api_host}'
 
 apt-get update -y
 apt-get install -y curl unzip jq ca-certificates
@@ -60,9 +61,18 @@ fi
 #  40-strongdm-nodes.tf. The flag name is a historical artefact — do not read
 #  anything into it.
 echo "--- installing StrongDM node software"
-cd /tmp
-curl -fsSL -J -O https://app.strongdm.com/releases/cli/install
-sh ./install
+TMP="$(mktemp -d)"
+(
+  cd "$TMP"
+  curl -fsSL -J -O https://app.strongdm.com/releases/cli/linux
+)
+ZIP="$(find "$TMP" -maxdepth 1 -name '*.zip' | head -1)"
+[ -n "$ZIP" ] || { echo "FATAL: StrongDM CLI archive was not downloaded"; exit 1; }
+unzip -oq "$ZIP" -d "$TMP"
+BIN="$(find "$TMP" -type f -name sdm | head -1)"
+[ -n "$BIN" ] || { echo "FATAL: StrongDM CLI binary missing from archive"; exit 1; }
+install -m 0755 "$BIN" /usr/local/bin/sdm
+rm -rf "$TMP"
 
 echo "--- registering node (gateway listener on :${listen_port})"
 sdm install \

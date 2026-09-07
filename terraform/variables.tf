@@ -35,6 +35,12 @@ variable "owner" {
   default     = "lance.haig@delinea.com"
 }
 
+variable "sdm_api_host" {
+  description = "StrongDM API endpoint used by gateway, relay, and agent service authentication."
+  type        = string
+  default     = "api.eu.strongdm.com:443"
+}
+
 
 # -----------------------------------------------------------------------------
 #  AWS placement

@@ -145,6 +145,7 @@ chmod +x "$CHECKOUT_DIR/agent/bootstrap.sh"
 
 env \
   SDM_ADMIN_TOKEN="$SDM_ADMIN_TOKEN" \
+  SDM_API_HOST='${sdm_api_host}' \
   OPENAI_API_KEY="$OPENAI_API_KEY" \
   PICOCLAW_VERSION='${picoclaw_version}' \
   PG_READ_RESOURCE='${pg_read_resource_name}' \
