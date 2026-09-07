@@ -32,7 +32,7 @@ permit (
     MCP::Action::"sse_stream",
     MCP::Action::"get_file_contents",
     MCP::Action::"list_pull_requests",
-    MCP::Action::"create_issue",
+    MCP::Action::"issue_write",
     MCP::Action::"create_pull_request"
   ],
   resource in StrongDM::Resource::"${github_mcp_resource_id}"

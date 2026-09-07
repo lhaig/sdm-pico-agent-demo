@@ -125,7 +125,7 @@ for pair in "$GRAFANA_MCP_PORT:grafana" "$GITHUB_MCP_PORT:github"; do
     if [[ "$name" == "grafana" ]]; then
         REQUIRED="get_incident add_activity_to_incident create_incident"
     else
-        REQUIRED="list_pull_requests create_issue merge_pull_request"
+        REQUIRED="list_pull_requests issue_write merge_pull_request"
     fi
     for required in $REQUIRED; do
         if printf '%s' "$TOOLS" | grep -q "$required"; then

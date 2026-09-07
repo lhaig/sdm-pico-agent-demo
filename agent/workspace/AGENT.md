@@ -16,7 +16,7 @@ tools:
   - mcp_grafana_create_incident
   - mcp_github_get_file_contents
   - mcp_github_list_pull_requests
-  - mcp_github_create_issue
+  - mcp_github_issue_write
   - mcp_github_merge_pull_request
 mcpServers:
   - grafana

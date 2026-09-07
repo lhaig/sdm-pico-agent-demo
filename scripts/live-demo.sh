@@ -105,7 +105,7 @@ case "$COMMAND" in
             || die "request $REQUEST_ID is not approved: $REQUEST_STATUS"
         BEFORE_RESUME_ACTIVITY="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1; sdm audit activities --from "$STARTED_AT" --json --extended 2>&1)"
         BEFORE_TIMELINE_COUNT="$(audit_record_count "$BEFORE_RESUME_ACTIVITY" "grafana-mcp" "add_activity_to_incident" "allow|permit|success")"
-        BEFORE_ISSUE_COUNT="$(audit_record_count "$BEFORE_RESUME_ACTIVITY" "github-mcp" "create_issue" "allow|permit|success")"
+        BEFORE_ISSUE_COUNT="$(audit_record_count "$BEFORE_RESUME_ACTIVITY" "github-mcp" "issue_write" "allow|permit|success")"
         "$SCRIPTS_DIR/trigger-agent.sh" --ask \
             "Human approval for incident ${INCIDENT_ID} has been granted. Continue the same incident now: confirm the remediation resource is available, run ./bin/sdm-request-access.sh --connect, execute exactly the previously justified UPDATE once through ./bin/db-query.sh --remediation, verify zero poisoned rows, update the incident timeline, and file the postmortem issue. Leave the incident open." \
             --wait
@@ -116,7 +116,7 @@ case "$COMMAND" in
             || die "audit does not contain exactly one permitted canonical remediation update"
         RESUME_ACTIVITY="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1; sdm audit activities --from "$STARTED_AT" --json --extended 2>&1)"
         AFTER_TIMELINE_COUNT="$(audit_record_count "$RESUME_ACTIVITY" "grafana-mcp" "add_activity_to_incident" "allow|permit|success")"
-        AFTER_ISSUE_COUNT="$(audit_record_count "$RESUME_ACTIVITY" "github-mcp" "create_issue" "allow|permit|success")"
+        AFTER_ISSUE_COUNT="$(audit_record_count "$RESUME_ACTIVITY" "github-mcp" "issue_write" "allow|permit|success")"
         [[ "$AFTER_TIMELINE_COUNT" -eq $((BEFORE_TIMELINE_COUNT + 1)) ]] \
             || die "resume did not add exactly one post-remediation timeline entry"
         [[ "$AFTER_ISSUE_COUNT" -eq $((BEFORE_ISSUE_COUNT + 1)) ]] \
