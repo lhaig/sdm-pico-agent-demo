@@ -46,7 +46,7 @@ if printf '%s' "$STATUS" | grep -q "$PG_REMEDIATION_RESOURCE"; then
 fi
 REQUESTS="$(agent_exec "sdm access requests" 2>&1 || true)"
 if printf '%s\n' "$REQUESTS" | awk \
-    '$4 ~ /^(Pending|Approved|Granted|Active)$/ { found = 1 } END { exit !found }'; then
+    '$4 == "Pending" { found = 1 } END { exit !found }'; then
     printf '%s\n' "$REQUESTS" >&2
     die "an active remediation request remains; cancel or revoke it before presenting"
 fi
