@@ -39,7 +39,6 @@ permit (
 permit (
   principal == StrongDM::Account::"${agent_account_id}",
   action in [
-    StrongDM::AccessRequest::Action::"audit",
     StrongDM::AccessRequest::Action::"create",
     StrongDM::AccessRequest::Action::"list"
   ],

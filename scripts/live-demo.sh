@@ -99,7 +99,8 @@ case "$COMMAND" in
             || die "expected exactly one new remediation request; observed: $NEW_REQUESTS"
         REQUEST_ID="$(printf '%s\n' "$NEW_REQUESTS" | awk '{print $1}')"
         [[ -n "$REQUEST_ID" ]] || die "could not identify the new remediation request"
-        REQUEST_DETAIL="$(agent_exec "sdm access request '$REQUEST_ID'" 2>&1)"
+        REQUEST_DETAIL="$(agent_exec "sdm access requests" 2>&1 | awk -v id="$REQUEST_ID" \
+            '$1 == id { found = 1 } found && $1 ~ /^aq-/ && $1 != id { exit } found { print }')"
         for expected in "$INCIDENT_ID" "UPDATE public.orders" "400" "poison_backup"; do
             printf '%s' "$REQUEST_DETAIL" | grep -Fq "$expected" \
                 || die "request $REQUEST_ID justification is missing: $expected"
@@ -110,7 +111,8 @@ case "$COMMAND" in
     resume)
         load_state
         [[ "$PHASE" == "awaiting_approval" ]] || die "expected awaiting_approval phase, got $PHASE"
-        REQUEST_STATUS="$(agent_exec "sdm access request '$REQUEST_ID'" 2>&1)"
+        REQUEST_STATUS="$(agent_exec "sdm access requests" 2>&1 | awk -v id="$REQUEST_ID" \
+            '$1 == id { found = 1 } found && $1 ~ /^aq-/ && $1 != id { exit } found { print }')"
         printf '%s' "$REQUEST_STATUS" | grep -Eqi 'approved|granted' \
             || die "request $REQUEST_ID is not approved: $REQUEST_STATUS"
         BEFORE_RESUME_ACTIVITY="$(sdm audit queries --from "$STARTED_AT" --json --extended 2>&1; sdm audit activities --from "$STARTED_AT" --json --extended 2>&1)"
