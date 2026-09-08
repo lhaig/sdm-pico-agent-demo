@@ -50,7 +50,7 @@ if agent_exec "test ! -w '${AGENT_WORKSPACE}/bin'"; then
 else
     fail "workspace/bin is writable by the agent"
 fi
-for f in db-query.sh sdm-request-access.sh; do
+for f in db-query.sh db-probe-standing-denial.sh sdm-request-access.sh; do
     OWNER="$(agent_exec "stat -c '%U:%G' '${AGENT_WORKSPACE}/bin/${f}'" 2>/dev/null)"
     if [[ "$OWNER" == "root:root" ]]; then pass "$f is root-owned"; else fail "$f owner is $OWNER, expected root:root"; fi
 done
@@ -119,7 +119,7 @@ else
     fail "customer row-cap probe failed: $CAPPED"
 fi
 
-DENIAL="$(agent_exec "cd '${AGENT_WORKSPACE}' && ./bin/db-query.sh \"UPDATE public.customers SET tier='standard' WHERE id=-1\"" 2>&1)"
+DENIAL="$(agent_exec "cd '${AGENT_WORKSPACE}' && ./bin/db-probe-standing-denial.sh" 2>&1)"
 DENIAL_RC=$?
 if [[ $DENIAL_RC -eq 3 && "$DENIAL" == *"Autonomous agents cannot write through standing production access."* ]]; then
     pass "safe zero-row write probe is denied on standing access"

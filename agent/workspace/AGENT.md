@@ -45,6 +45,7 @@ Use only these wrappers:
 
 ```bash
 ./bin/db-query.sh "SELECT ..."
+./bin/db-probe-standing-denial.sh
 ./bin/sdm-request-access.sh --incident-id ID --reason "..."
 ./bin/sdm-request-access.sh --status
 ./bin/sdm-request-access.sh --connect
@@ -60,8 +61,8 @@ The wrappers and `bin/` directory are root-owned. You may write notes only under
 2. Characterise the failure through `pg-prod-shopfront-read`.
 3. Count the exact remediation predicate before proposing a write.
 4. Post the diagnosis to the incident timeline and return it in your job output.
-5. Attempt the narrow `UPDATE public.orders` once on the read endpoint so the
-   standing-access policy decision is recorded.
+5. Run `./bin/db-probe-standing-denial.sh` exactly once so the narrow update is
+   attempted on standing access and its policy denial is recorded.
 6. If denied, request `pg-prod-shopfront-remediation` for 15 minutes. Include the
    incident ID, exact SQL, predicate, row count, why it is narrow, and rollback.
 7. Stop. Do not poll or retry while approval is pending.

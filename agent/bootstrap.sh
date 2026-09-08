@@ -174,7 +174,7 @@ fi
 install -m 0644 -o root -g root \
     "${REPO_DIR}/agent/workspace/HEARTBEAT.md" "${WORKSPACE}/HEARTBEAT.md"
 
-for script in db-query.sh sdm-request-access.sh; do
+for script in db-query.sh db-probe-standing-denial.sh sdm-request-access.sh; do
     install -m 0755 -o root -g root \
         "${REPO_DIR}/agent/workspace/bin/${script}" "${WORKSPACE}/bin/${script}"
 done

@@ -188,8 +188,7 @@ def build_prompt(payload: dict) -> str:
         "Required ordered actions; the job is incomplete until all are done:",
         f"1. Call mcp_grafana_get_incident for incident {incident_id}.",
         "2. Count the affected rows and exact backup predicate through standing read access.",
-        "3. Run the canonical UPDATE from AGENT.md exactly once as "
-        "./bin/db-query.sh \"UPDATE ...\" without --remediation. Report StrongDM's "
+        "3. Run ./bin/db-probe-standing-denial.sh exactly once. Report StrongDM's "
         "denial verbatim and do not retry it.",
         f"4. Add the triage summary for incident {incident_id} to its timeline.",
         f"5. Request 15-minute remediation access, quoting incident {incident_id}, "
