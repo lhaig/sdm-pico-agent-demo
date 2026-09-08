@@ -140,7 +140,7 @@ if admin_db_up; then
     POISON="$(psql_admin_q "SELECT count(*) FROM public.orders WHERE status='PENDING_RECONCILE'" | tr -d '[:space:]')"
     if [[ "$POISON" == "0" ]]; then pass "database is clean"; else fail "$POISON poisoned rows remain"; fi
 else
-    fail "open the human connection with: sdm connect $PG_READ_RESOURCE 5433"
+    fail "open the human connection with: sdm connect $PG_ADMIN_RESOURCE 5433"
 fi
 
 say "Live control surfaces"

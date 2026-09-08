@@ -22,6 +22,11 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPTS_DIR}/.." && pwd)"
 export SCRIPTS_DIR REPO_DIR
 
+# Terraform uses admin API credentials, while SSH and local connections must
+# use the operator's authenticated desktop session. Never let one shadow the
+# other in child processes.
+SDM_USER_ENV=(env -u SDM_API_ACCESS_KEY -u SDM_API_SECRET_KEY -u SDM_API_HOST)
+
 # -----------------------------------------------------------------------------
 # Output
 # -----------------------------------------------------------------------------
@@ -180,7 +185,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # operator never holds an EC2 private key and the VM has no public SSH ingress.
 agent_exec() {
     [[ -f "$SDM_SSH_CONFIG" ]] || die "StrongDM SSH config missing; run ./scripts/live-demo.sh operator-tunnel"
-    ssh -F "$SDM_SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=8 \
+    "${SDM_USER_ENV[@]}" ssh -F "$SDM_SSH_CONFIG" -o BatchMode=yes -o ConnectTimeout=8 \
         -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" \
         "$AGENT_SSH_RESOURCE" "$@"
 }

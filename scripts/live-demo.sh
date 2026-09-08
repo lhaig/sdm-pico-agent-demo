@@ -27,9 +27,9 @@ case "$COMMAND" in
     operator-tunnel)
         have sdm || die "sdm CLI is required on the operator laptop"
         [[ -n "$AGENT_SSH_RESOURCE" ]] || die "set AGENT_SSH_RESOURCE in scripts/.env"
-        sdm ssh config --write "$SDM_SSH_CONFIG" >/dev/null
+        "${SDM_USER_ENV[@]}" sdm ssh config --write "$SDM_SSH_CONFIG" >/dev/null
         chmod 0600 "$SDM_SSH_CONFIG"
-        if [[ -S "$SSH_CONTROL" ]] && ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O check "$AGENT_SSH_RESOURCE" >/dev/null 2>&1; then
+        if [[ -S "$SSH_CONTROL" ]] && "${SDM_USER_ENV[@]}" ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O check "$AGENT_SSH_RESOURCE" >/dev/null 2>&1; then
             ok "operator control tunnel is already running"
             info "the agent's StrongDM resource connections run independently on the agent VM"
             exit 0
@@ -38,7 +38,7 @@ case "$COMMAND" in
         if port_open 127.0.0.1 "$GRAFANA_MCP_PORT" || port_open 127.0.0.1 "$GITHUB_MCP_PORT" || port_open 127.0.0.1 18791; then
             die "a required local port is occupied by an unmanaged process"
         fi
-        if ! ssh -F "$SDM_SSH_CONFIG" -M -S "$SSH_CONTROL" -fN -o ExitOnForwardFailure=yes \
+        if ! "${SDM_USER_ENV[@]}" ssh -F "$SDM_SSH_CONFIG" -M -S "$SSH_CONTROL" -fN -o ExitOnForwardFailure=yes \
             -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" \
             -L "${GRAFANA_MCP_PORT}:127.0.0.1:10001" \
             -L "${GITHUB_MCP_PORT}:127.0.0.1:10002" \
@@ -155,7 +155,7 @@ case "$COMMAND" in
     reset)
         "$SCRIPTS_DIR/reset.sh"
         if [[ -S "$SSH_CONTROL" ]]; then
-            ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O exit "$AGENT_SSH_RESOURCE" >/dev/null
+            "${SDM_USER_ENV[@]}" ssh -F "$SDM_SSH_CONFIG" -o UserKnownHostsFile="$SDM_KNOWN_HOSTS" -S "$SSH_CONTROL" -O exit "$AGENT_SSH_RESOURCE" >/dev/null
         fi
         ;;
     *)
