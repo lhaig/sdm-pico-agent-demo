@@ -64,7 +64,7 @@ case "$COMMAND" in
         load_state
         [[ "$PHASE" == "prepared" ]] || die "expected prepared phase, got $PHASE"
         STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        BEFORE_REQUESTS="$(agent_exec "sdm access requests" 2>&1 | grep "$PG_REMEDIATION_RESOURCE" || true)"
+        BEFORE_REQUESTS="$(agent_exec "sdm access requests" 2>&1 | awk 'NR > 1 && $1 ~ /^aq-/ { print $1 }')"
         "$SCRIPTS_DIR/break-it.sh" --no-wait
         INCIDENT_ID="$(irm_open_incident \
             "malformed Shopfront order batch detected" \
@@ -91,7 +91,7 @@ case "$COMMAND" in
             || die "audit has no permitted get_incident event"
         audit_has_record "$ACTIVITY_AUDIT" "grafana-mcp" "add_activity_to_incident" "allow|permit|success" \
             || die "audit has no permitted incident-timeline event"
-        AFTER_REQUESTS="$(agent_exec "sdm access requests" 2>&1 | grep "$PG_REMEDIATION_RESOURCE" || true)"
+        AFTER_REQUESTS="$(agent_exec "sdm access requests" 2>&1 | awk 'NR > 1 && $1 ~ /^aq-/ { print $1 }')"
         NEW_REQUESTS="$(comm -13 \
             <(printf '%s\n' "$BEFORE_REQUESTS" | sed '/^$/d' | sort) \
             <(printf '%s\n' "$AFTER_REQUESTS" | sed '/^$/d' | sort))"
